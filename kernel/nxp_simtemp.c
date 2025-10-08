@@ -69,3 +69,46 @@ static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 	return temp;
 }
 
+int simtemp_generate_sample(struct simtemp_device *simtemp)
+{
+	struct simtemp_sample sample;
+	unsigned long flags;
+	bool threshold_event = false;
+	int ret;
+	
+	if (!simtemp->enabled)
+		return 0;
+	
+	sample.timestamp_ns = ktime_get_ns();
+	sample.temp_mC = simtemp_get_base_temperature(simtemp);
+	sample.flags = SIMTEMP_FLAG_NEW_SAMPLE;
+	
+	if ((simtemp->last_temp_mC < simtemp->threshold_mC && 
+	     sample.temp_mC >= simtemp->threshold_mC) ||
+	    (simtemp->last_temp_mC >= simtemp->threshold_mC && 
+	     sample.temp_mC < simtemp->threshold_mC)) {
+		sample.flags |= SIMTEMP_FLAG_THRESHOLD_CROSSED;
+		threshold_event = true;
+		simtemp->stats.alerts++;
+	}
+	
+	simtemp->last_temp_mC = sample.temp_mC;
+	
+	spin_lock_irqsave(&simtemp->buffer_lock, flags);
+	ret = kfifo_put(&simtemp->sample_buffer, sample);
+	spin_unlock_irqrestore(&simtemp->buffer_lock, flags);
+	
+	if (!ret) {
+		simtemp->stats.last_error = -EOVERFLOW;
+		simtemp_warn(simtemp, "Sample buffer overflow\n");
+	} else {
+		simtemp->stats.updates++;
+	}
+	
+	wake_up_interruptible(&simtemp->wait_queue);
+	
+	simtemp_dbg(simtemp, "Generated sample: temp=%d.%03d°C, flags=0x%x\n",
+		    sample.temp_mC / 1000, abs(sample.temp_mC % 1000), sample.flags);
+	
+	return 0;
+}
