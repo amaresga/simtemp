@@ -1,7 +1,13 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-
+#include <linux/platform_device.h>
+#include <linux/of.h>
+#include <linux/atomic.h>
+#include <linux/fs.h>
+#include <linux/random.h>
+#include <linux/ktime.h>
+#include <linux/slab.h>
 
 #include "nxp_simtemp.h"
 
@@ -112,3 +118,50 @@ int simtemp_generate_sample(struct simtemp_device *simtemp)
 	
 	return 0;
 }
+
+static int simtemp_probe(struct platform_device *pdev)
+{
+	struct simtemp_device *simtemp;
+
+	simtemp->mode = SIMTEMP_MODE_NORMAL;
+	simtemp->enabled = false;
+	simtemp->last_temp_mC = SIMTEMP_BASE_TEMP_MC;
+	
+	mutex_init(&simtemp->config_lock);
+	spin_lock_init(&simtemp->buffer_lock);
+	init_waitqueue_head(&simtemp->wait_queue);
+	atomic_set(&simtemp->open_count, 0);
+	
+	INIT_KFIFO(simtemp->sample_buffer);
+
+	
+	dev_info(&pdev->dev, "NXP simtemp driver probed successfully\n");
+	
+	return 0;
+}
+
+static struct platform_driver simtemp_driver = {
+	.probe = simtemp_probe,
+	.remove = simtemp_remove,
+	.driver = {
+		.name = "nxp-simtemp",
+		.of_match_table = simtemp_of_match,
+	},
+};
+
+static int __init simtemp_init(void)
+{
+	pr_info("NXP Simulated Temperature Sensor Driver Initializing\n");
+
+	pr_info("nxp-simtemp: Module loaded successfully\n");
+	return 0;
+}
+
+
+static void __exit simtemp_exit(void)
+{
+	pr_info("nxp-simtemp: Module unloaded\n");
+}
+
+module_init(simtemp_init);
+module_exit(simtemp_exit);

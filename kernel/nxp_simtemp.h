@@ -31,6 +31,16 @@ struct simtemp_device {
 	spinlock_t buffer_lock;
 
 	wait_queue_head_t wait_queue;
+
+	struct mutex config_lock;
+	atomic_t open_count;
+};
+
+enum simtemp_mode {
+	SIMTEMP_MODE_NORMAL = 0,
+	SIMTEMP_MODE_NOISY,
+	SIMTEMP_MODE_RAMP,
+	SIMTEMP_MODE_MAX
 };
 
 struct simtemp_stats {
@@ -40,3 +50,14 @@ struct simtemp_stats {
 	unsigned long poll_calls;
 	int last_error;
 };
+
+#define SIMTEMP_DEFAULT_SAMPLING_MS		100
+#define SIMTEMP_DEFAULT_THRESHOLD_MC	45000	/* 45.0 °C */
+#define SIMTEMP_MIN_SAMPLING_MS			1
+#define SIMTEMP_MAX_SAMPLING_MS			10000
+
+#define SIMTEMP_BASE_TEMP_MC			25000	/* 25.0 °C */
+#define SIMTEMP_TEMP_RANGE_MC			30000	/* ±30.0 °C */
+#define SIMTEMP_NOISE_RANGE_MC			2000	/* ±2.0 °C */
+
+int simtemp_generate_sample(struct simtemp_device *simtemp);
