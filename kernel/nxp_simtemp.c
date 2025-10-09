@@ -12,6 +12,7 @@
 #include <linux/poll.h>
 
 #include "nxp_simtemp.h"
+#include "nxp_simtemp_ioctl.h"
 
 MODULE_AUTHOR("Armando Mares");
 MODULE_DESCRIPTION("NXP Simulated Temperature Sensor Driver");
@@ -194,6 +195,98 @@ static ssize_t simtemp_read(struct file *file, char __user *buf, size_t count, l
 	
 	return sizeof(struct simtemp_sample);
 }
+
+static long simtemp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct simtemp_device *simtemp = file->private_data;
+	struct simtemp_config config;
+	struct simtemp_ioctl_stats stats;
+	int ret = 0;
+	
+	if (_IOC_TYPE(cmd) != SIMTEMP_IOC_MAGIC)
+		return -ENOTTY;
+	if (_IOC_NR(cmd) > SIMTEMP_IOC_MAXNR)
+		return -ENOTTY;
+	
+	switch (cmd) {
+	case SIMTEMP_IOC_GET_CONFIG:
+		config.sampling_ms = simtemp->sampling_ms;
+		config.threshold_mC = simtemp->threshold_mC;
+		config.mode = simtemp->mode;
+		config.flags = 0;
+
+		if (copy_to_user((void __user *)arg, &config, sizeof(config))) {
+			ret = -EFAULT;
+		}
+		break;
+		
+	case SIMTEMP_IOC_SET_CONFIG:
+		if (copy_from_user(&config, (void __user *)arg, sizeof(config))) {
+			ret = -EFAULT;
+			break;
+		}
+		
+		if (config.sampling_ms < SIMTEMP_MIN_SAMPLING_MS ||
+		    config.sampling_ms > SIMTEMP_MAX_SAMPLING_MS ||
+		    config.mode >= SIMTEMP_MODE_MAX) {
+			ret = -EINVAL;
+			break;
+		}
+		
+		simtemp->sampling_ms = config.sampling_ms;
+		simtemp->threshold_mC = config.threshold_mC;
+		simtemp->mode = config.mode;
+		break;
+		
+	case SIMTEMP_IOC_GET_STATS:
+		stats.updates = simtemp->stats.updates;
+		stats.alerts = simtemp->stats.alerts;
+		stats.read_calls = simtemp->stats.read_calls;
+		stats.poll_calls = simtemp->stats.poll_calls;
+		stats.last_error = simtemp->stats.last_error;
+		stats.buffer_usage = (kfifo_len(&simtemp->sample_buffer) * 100) / SIMTEMP_BUFFER_SIZE;
+		
+		if (copy_to_user((void __user *)arg, &stats, sizeof(stats)))
+			ret = -EFAULT;
+		break;
+		
+	case SIMTEMP_IOC_RESET_STATS:
+		memset(&simtemp->stats, 0, sizeof(simtemp->stats));
+		break;
+		
+	case SIMTEMP_IOC_ENABLE:
+		if (!simtemp->enabled) {
+			simtemp->enabled = true;
+			hrtimer_start(&simtemp->timer, ms_to_ktime(simtemp->sampling_ms), HRTIMER_MODE_REL);
+		}
+		break;
+		
+	case SIMTEMP_IOC_DISABLE:
+		simtemp->enabled = false;
+		hrtimer_cancel(&simtemp->timer);
+		break;
+		
+	case SIMTEMP_IOC_FLUSH_BUFFER:
+		kfifo_reset(&simtemp->sample_buffer);
+		break;
+		
+	default:
+		ret = -ENOTTY;
+		break;
+	}
+	
+	return ret;
+}
+
+static const struct file_operations simtemp_fops = {
+	.owner = THIS_MODULE,
+	.open = simtemp_open,
+	.release = simtemp_release,
+	.read = simtemp_read,
+	.poll = simtemp_poll,
+	.unlocked_ioctl = simtemp_ioctl,
+	.llseek = noop_llseek,
+};
 
 static int simtemp_probe(struct platform_device *pdev)
 {
