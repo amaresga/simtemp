@@ -8,6 +8,8 @@
 #include <linux/random.h>
 #include <linux/ktime.h>
 #include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <linux/poll.h>
 
 #include "nxp_simtemp.h"
 
@@ -117,6 +119,80 @@ int simtemp_generate_sample(struct simtemp_device *simtemp)
 		    sample.temp_mC / 1000, abs(sample.temp_mC % 1000), sample.flags);
 	
 	return 0;
+}
+
+static int simtemp_open(struct inode *inode, struct file *file)
+{
+	struct simtemp_device *simtemp = container_of(file->private_data, struct simtemp_device, misc_dev);
+	
+	if (atomic_inc_return(&simtemp->open_count) == 1) {
+		simtemp_info(simtemp, "Device opened\n");
+	}
+	
+	file->private_data = simtemp;
+	return 0;
+}
+
+static int simtemp_release(struct inode *inode, struct file *file)
+{
+	struct simtemp_device *simtemp = file->private_data;
+	
+	if (atomic_dec_return(&simtemp->open_count) == 0) {
+		simtemp_info(simtemp, "Device closed\n");
+	}
+	
+	return 0;
+}
+
+static __poll_t simtemp_poll(struct file *file, struct poll_table_struct *wait)
+{
+	struct simtemp_device *simtemp = file->private_data;
+	__poll_t mask = 0;
+	
+	simtemp->stats.poll_calls++;
+	
+	poll_wait(file, &simtemp->wait_queue, wait);
+	
+	if (!kfifo_is_empty(&simtemp->sample_buffer))
+		mask |= EPOLLIN | EPOLLRDNORM;
+	
+	return mask;
+}
+
+
+static ssize_t simtemp_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	struct simtemp_device *simtemp = file->private_data;
+	struct simtemp_sample sample;
+	unsigned long flags;
+	int ret;
+	
+	simtemp->stats.read_calls++;
+	
+	if (count < sizeof(struct simtemp_sample))
+		return -EINVAL;
+	
+	if (kfifo_is_empty(&simtemp->sample_buffer)) {
+		if (file->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		
+		ret = wait_event_interruptible(simtemp->wait_queue,
+					       !kfifo_is_empty(&simtemp->sample_buffer));
+		if (ret)
+			return ret;
+	}
+	
+	spin_lock_irqsave(&simtemp->buffer_lock, flags);
+	ret = kfifo_get(&simtemp->sample_buffer, &sample);
+	spin_unlock_irqrestore(&simtemp->buffer_lock, flags);
+	
+	if (!ret)
+		return -EAGAIN;
+	
+	if (copy_to_user(buf, &sample, sizeof(sample)))
+		return -EFAULT;
+	
+	return sizeof(struct simtemp_sample);
 }
 
 static int simtemp_probe(struct platform_device *pdev)
