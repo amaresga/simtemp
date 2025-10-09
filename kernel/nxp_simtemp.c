@@ -3,6 +3,8 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
+#include <linux/miscdevice.h>
 #include <linux/atomic.h>
 #include <linux/fs.h>
 #include <linux/random.h>
@@ -317,6 +319,47 @@ static struct platform_driver simtemp_driver = {
 		.of_match_table = simtemp_of_match,
 	},
 };
+
+static ssize_t sampling_ms_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	return sprintf(buf, "%u\n", simtemp->sampling_ms);
+}
+
+static ssize_t threshold_mC_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", simtemp->threshold_mC);
+}
+
+static ssize_t mode_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	const char *mode_names[] = {"normal", "noisy", "ramp"};
+	
+	if (simtemp->mode >= ARRAY_SIZE(mode_names))
+		return sprintf(buf, "unknown\n");
+	
+	return sprintf(buf, "%s\n", mode_names[simtemp->mode]);
+}
+
+static ssize_t stats_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	return sprintf(buf, "updates: %lu\nalerts: %lu\nread_calls: %lu\npoll_calls: %lu\nlast_error: %d\nbuffer_usage: %u%%\n",
+		       simtemp->stats.updates, simtemp->stats.alerts,
+		       simtemp->stats.read_calls, simtemp->stats.poll_calls,
+		       simtemp->stats.last_error,
+		       (kfifo_len(&simtemp->sample_buffer) * 100) / SIMTEMP_BUFFER_SIZE);
+}
+static DEVICE_ATTR_RO(stats);
+
+static ssize_t enabled_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", simtemp->enabled ? 1 : 0);
+}
+
 
 static int __init simtemp_init(void)
 {
