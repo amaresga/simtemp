@@ -290,36 +290,6 @@ static const struct file_operations simtemp_fops = {
 	.llseek = noop_llseek,
 };
 
-static int simtemp_probe(struct platform_device *pdev)
-{
-	struct simtemp_device *simtemp;
-
-	simtemp->mode = SIMTEMP_MODE_NORMAL;
-	simtemp->enabled = false;
-	simtemp->last_temp_mC = SIMTEMP_BASE_TEMP_MC;
-	
-	mutex_init(&simtemp->config_lock);
-	spin_lock_init(&simtemp->buffer_lock);
-	init_waitqueue_head(&simtemp->wait_queue);
-	atomic_set(&simtemp->open_count, 0);
-	
-	INIT_KFIFO(simtemp->sample_buffer);
-
-	
-	dev_info(&pdev->dev, "NXP simtemp driver probed successfully\n");
-	
-	return 0;
-}
-
-static struct platform_driver simtemp_driver = {
-	.probe = simtemp_probe,
-	.remove = simtemp_remove,
-	.driver = {
-		.name = "nxp-simtemp",
-		.of_match_table = simtemp_of_match,
-	},
-};
-
 static ssize_t sampling_ms_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct simtemp_device *simtemp = dev_get_drvdata(dev);
@@ -359,6 +329,148 @@ static ssize_t enabled_show(struct device *dev, struct device_attribute *attr, c
 	struct simtemp_device *simtemp = dev_get_drvdata(dev);
 	return sprintf(buf, "%d\n", simtemp->enabled ? 1 : 0);
 }
+
+static ssize_t sampling_ms_store(struct device *dev, struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	unsigned int val;
+	int ret;
+	
+	ret = kstrtouint(buf, 10, &val);
+	if (ret)
+		return ret;
+	
+	if (val < SIMTEMP_MIN_SAMPLING_MS || val > SIMTEMP_MAX_SAMPLING_MS)
+		return -EINVAL;
+	
+	mutex_lock(&simtemp->config_lock);
+	simtemp->sampling_ms = val;
+	mutex_unlock(&simtemp->config_lock);
+	
+	return count;
+}
+static DEVICE_ATTR_RW(sampling_ms);
+
+static ssize_t threshold_mC_store(struct device *dev, struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	int val;
+	int ret;
+	
+	ret = kstrtoint(buf, 10, &val);
+	if (ret)
+		return ret;
+	
+	mutex_lock(&simtemp->config_lock);
+	simtemp->threshold_mC = val;
+	mutex_unlock(&simtemp->config_lock);
+	
+	return count;
+}
+static DEVICE_ATTR_RW(threshold_mC);
+
+static ssize_t mode_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	enum simtemp_mode mode;
+	
+	if (sysfs_streq(buf, "normal"))
+		mode = SIMTEMP_MODE_NORMAL;
+	else if (sysfs_streq(buf, "noisy"))
+		mode = SIMTEMP_MODE_NOISY;
+	else if (sysfs_streq(buf, "ramp"))
+		mode = SIMTEMP_MODE_RAMP;
+	else
+		return -EINVAL;
+	
+	mutex_lock(&simtemp->config_lock);
+	simtemp->mode = mode;
+	mutex_unlock(&simtemp->config_lock);
+	
+	return count;
+}
+static DEVICE_ATTR_RW(mode);
+
+static ssize_t enabled_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct simtemp_device *simtemp = dev_get_drvdata(dev);
+	bool val;
+	int ret;
+	
+	ret = kstrtobool(buf, &val);
+	if (ret)
+		return ret;
+	
+	mutex_lock(&simtemp->config_lock);
+	if (val && !simtemp->enabled) {
+		simtemp->enabled = true;
+		hrtimer_start(&simtemp->timer, ms_to_ktime(simtemp->sampling_ms), HRTIMER_MODE_REL);
+	} else if (!val && simtemp->enabled) {
+		simtemp->enabled = false;
+		hrtimer_cancel(&simtemp->timer);
+	}
+	mutex_unlock(&simtemp->config_lock);
+	
+	return count;
+}
+static DEVICE_ATTR_RW(enabled);
+
+static struct attribute *simtemp_attrs[] = {
+	&dev_attr_sampling_ms.attr,
+	&dev_attr_threshold_mC.attr,
+	&dev_attr_mode.attr,
+	&dev_attr_stats.attr,
+	&dev_attr_enabled.attr,
+	NULL,
+};
+
+static const struct attribute_group simtemp_attr_group = {
+	.attrs = simtemp_attrs,
+};
+
+int simtemp_sysfs_init(struct simtemp_device *simtemp)
+{
+	return sysfs_create_group(&simtemp->misc_dev.this_device->kobj, &simtemp_attr_group);
+}
+
+void simtemp_sysfs_cleanup(struct simtemp_device *simtemp)
+{
+	sysfs_remove_group(&simtemp->misc_dev.this_device->kobj, &simtemp_attr_group);
+}
+
+static int simtemp_probe(struct platform_device *pdev)
+{
+	struct simtemp_device *simtemp;
+
+	simtemp->mode = SIMTEMP_MODE_NORMAL;
+	simtemp->enabled = false;
+	simtemp->last_temp_mC = SIMTEMP_BASE_TEMP_MC;
+	
+	mutex_init(&simtemp->config_lock);
+	spin_lock_init(&simtemp->buffer_lock);
+	init_waitqueue_head(&simtemp->wait_queue);
+	atomic_set(&simtemp->open_count, 0);
+	
+	INIT_KFIFO(simtemp->sample_buffer);
+
+	
+	dev_info(&pdev->dev, "NXP simtemp driver probed successfully\n");
+	
+	return 0;
+}
+
+static struct platform_driver simtemp_driver = {
+	.probe = simtemp_probe,
+	.remove = simtemp_remove,
+	.driver = {
+		.name = "nxp-simtemp",
+		.of_match_table = simtemp_of_match,
+	},
+};
 
 
 static int __init simtemp_init(void)
