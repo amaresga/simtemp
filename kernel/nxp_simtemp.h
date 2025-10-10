@@ -13,13 +13,22 @@ struct simtemp_sample {
 	__u32 flags;		/* bit0=NEW_SAMPLE, bit1=THRESHOLD_CROSSED */
 } __attribute__((packed));
 
+#define SIMTEMP_FLAG_NEW_SAMPLE			BIT(0)
+#define SIMTEMP_FLAG_THRESHOLD_CROSSED	BIT(1)
+
 #define SIMTEMP_BUFFER_SIZE	64
 
 struct simtemp_device {
+	struct platform_device *pdev;
+	struct miscdevice misc_dev;
+	struct device *dev;
 
 	unsigned int sampling_ms;
 	s32 threshold_mC;
 	enum simtemp_mode mode;
+
+	struct hrtimer timer;
+	struct work_struct sample_work;
 
     s32 last_temp_mC;
     bool enabled;
@@ -34,6 +43,13 @@ struct simtemp_device {
 
 	struct mutex config_lock;
 	atomic_t open_count;
+
+	bool enabled;
+	s32 last_temp_mC;
+	bool threshold_crossed;
+
+	u32 dt_sampling_ms;
+	s32 dt_threshold_mC;
 };
 
 enum simtemp_mode {
@@ -61,3 +77,22 @@ struct simtemp_stats {
 #define SIMTEMP_NOISE_RANGE_MC			2000	/* ±2.0 °C */
 
 int simtemp_generate_sample(struct simtemp_device *simtemp);
+int simtemp_sysfs_init(struct simtemp_device *simtemp);
+void simtemp_sysfs_cleanup(struct simtemp_device *simtemp);
+int simtemp_generate_sample(struct simtemp_device *simtemp);
+enum hrtimer_restart simtemp_timer_callback(struct hrtimer *timer);
+void simtemp_sample_work(struct work_struct *work);
+
+#define simtemp_err(simtemp, fmt, args...) \
+	dev_err((simtemp)->dev, fmt, ##args)
+
+#define simtemp_warn(simtemp, fmt, args...) \
+	dev_warn((simtemp)->dev, fmt, ##args)
+
+#define simtemp_info(simtemp, fmt, args...) \
+	dev_info((simtemp)->dev, fmt, ##args)
+
+#define simtemp_dbg(simtemp, fmt, args...) \
+	dev_dbg((simtemp)->dev, fmt, ##args)
+
+#endif /* _NXP_SIMTEMP_H_ */

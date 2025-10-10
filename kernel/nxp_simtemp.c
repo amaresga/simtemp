@@ -142,6 +142,26 @@ int simtemp_generate_sample(struct simtemp_device *simtemp)
 	return 0;
 }
 
+void simtemp_sample_work(struct work_struct *work)
+{
+	struct simtemp_device *simtemp = container_of(work, struct simtemp_device, sample_work);
+	simtemp_generate_sample(simtemp);
+}
+
+enum hrtimer_restart simtemp_timer_callback(struct hrtimer *timer)
+{
+	struct simtemp_device *simtemp = container_of(timer, struct simtemp_device, timer);
+
+	schedule_work(&simtemp->sample_work);
+
+	if (simtemp->enabled) {
+		hrtimer_forward_now(timer, ms_to_ktime(simtemp->sampling_ms));
+		return HRTIMER_RESTART;
+	}
+	
+	return HRTIMER_NORESTART;
+}
+
 static int simtemp_open(struct inode *inode, struct file *file)
 {
 	struct simtemp_device *simtemp = container_of(file->private_data, struct simtemp_device, misc_dev);
