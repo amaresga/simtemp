@@ -3,9 +3,17 @@
 
 #include <linux/types.h>
 #include <linux/device.h>
-
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
+#include <linux/kfifo.h>
+#include <linux/wait.h>
+#include <linux/atomic.h>
+#include <linux/miscdevice.h>
+#include <linux/platform_device.h>
+#include <linux/hrtimer.h>
+#include <linux/workqueue.h>
+
+struct simtemp_device;
 
 struct simtemp_sample {
 	__u64 timestamp_ns;	/* monotonic timestamp */
@@ -13,44 +21,12 @@ struct simtemp_sample {
 	__u32 flags;		/* bit0=NEW_SAMPLE, bit1=THRESHOLD_CROSSED */
 } __attribute__((packed));
 
-#define SIMTEMP_FLAG_NEW_SAMPLE			BIT(0)
-#define SIMTEMP_FLAG_THRESHOLD_CROSSED	BIT(1)
+/* Flag definitions */
+#define SIMTEMP_FLAG_NEW_SAMPLE				BIT(0)
+#define SIMTEMP_FLAG_THRESHOLD_CROSSED		BIT(1)
 
-#define SIMTEMP_BUFFER_SIZE	64
-
-struct simtemp_device {
-	struct platform_device *pdev;
-	struct miscdevice misc_dev;
-	struct device *dev;
-
-	unsigned int sampling_ms;
-	s32 threshold_mC;
-	enum simtemp_mode mode;
-
-	struct hrtimer timer;
-	struct work_struct sample_work;
-
-    s32 last_temp_mC;
-    bool enabled;
-	bool threshold_crossed;
-    
-    struct simtemp_stats stats;
-
-	DECLARE_KFIFO(sample_buffer, struct simtemp_sample, SIMTEMP_BUFFER_SIZE);
-	spinlock_t buffer_lock;
-
-	wait_queue_head_t wait_queue;
-
-	struct mutex config_lock;
-	atomic_t open_count;
-
-	bool enabled;
-	s32 last_temp_mC;
-	bool threshold_crossed;
-
-	u32 dt_sampling_ms;
-	s32 dt_threshold_mC;
-};
+/* Buffer size */
+#define SIMTEMP_BUFFER_SIZE			64
 
 enum simtemp_mode {
 	SIMTEMP_MODE_NORMAL = 0,
@@ -67,6 +43,37 @@ struct simtemp_stats {
 	int last_error;
 };
 
+/* Main device structure */
+struct simtemp_device {
+	struct platform_device *pdev;
+	struct miscdevice misc_dev;
+	struct device *dev;
+
+	struct hrtimer timer;
+	struct work_struct sample_work;
+
+	unsigned int sampling_ms;
+	s32 threshold_mC;
+	enum simtemp_mode mode;
+
+	u32 dt_sampling_ms;
+	s32 dt_threshold_mC;
+
+	s32 last_temp_mC;
+	bool enabled;
+	bool threshold_crossed;
+
+	struct simtemp_stats stats;
+
+	DECLARE_KFIFO(sample_buffer, struct simtemp_sample, SIMTEMP_BUFFER_SIZE);
+	spinlock_t buffer_lock;
+
+	wait_queue_head_t wait_queue;
+
+	struct mutex config_lock;
+	atomic_t open_count;
+};
+
 #define SIMTEMP_DEFAULT_SAMPLING_MS		100
 #define SIMTEMP_DEFAULT_THRESHOLD_MC	45000	/* 45.0 °C */
 #define SIMTEMP_MIN_SAMPLING_MS			1
@@ -79,7 +86,6 @@ struct simtemp_stats {
 int simtemp_generate_sample(struct simtemp_device *simtemp);
 int simtemp_sysfs_init(struct simtemp_device *simtemp);
 void simtemp_sysfs_cleanup(struct simtemp_device *simtemp);
-int simtemp_generate_sample(struct simtemp_device *simtemp);
 enum hrtimer_restart simtemp_timer_callback(struct hrtimer *timer);
 void simtemp_sample_work(struct work_struct *work);
 

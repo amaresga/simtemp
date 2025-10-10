@@ -30,6 +30,8 @@
 #include <linux/hrtimer.h>
 #include <linux/workqueue.h>
 #include <linux/jiffies.h>
+#include <linux/kfifo.h>
+#include <linux/wait.h>
 
 #include "nxp_simtemp.h"
 #include "nxp_simtemp_ioctl.h"
@@ -38,6 +40,9 @@ MODULE_AUTHOR("Armando Mares");
 MODULE_DESCRIPTION("NXP Simulated Temperature Sensor Driver");
 MODULE_LICENSE("GPL v2");
 MODULE_VERSION("1.0.0");
+
+/* Global variables */
+static struct simtemp_device *g_simtemp_dev = NULL;
 
 
 static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
