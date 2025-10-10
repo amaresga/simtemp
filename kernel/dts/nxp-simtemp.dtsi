@@ -1,0 +1,35 @@
+/*
+ * Device Tree Include file for NXP Simulated Temperature Sensor
+ * 
+ * This file provides the device tree binding for the nxp,simtemp
+ * virtual temperature sensor driver.
+ * 
+ * Copyright (c) 2025 Armando Mares
+ */
+
+/ {
+	simtemp0: simtemp@0 {
+		compatible = "nxp,simtemp";
+		
+		sampling-ms = <100>;
+		
+		threshold-mC = <45000>;
+		
+		status = "okay";
+		
+		device-name = "simtemp0";
+	};
+	
+	simtemp1: simtemp@1 {
+		compatible = "nxp,simtemp";
+		sampling-ms = <200>;
+		threshold-mC = <50000>;  /* 50.0°C */
+		status = "disabled";     /* Disabled by default */
+		device-name = "simtemp1";
+	};
+};
+
+/*
+ * Device Tree Binding Documentation:
+
+ */
