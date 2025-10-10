@@ -1,3 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * NXP Simulated Temperature Sensor Driver
+ * 
+ * This driver simulates a hardware temperature sensor using a platform driver
+ * approach. It provides:
+ * - Character device interface for reading temperature samples
+ * - poll/epoll support for event-driven reading
+ * - sysfs interface for configuration
+ * - ioctl interface for batch operations
+ * - Device Tree binding support
+ * 
+ * Copyright (c) 2025 Armando Mares
+ */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -12,6 +27,9 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/poll.h>
+#include <linux/hrtimer.h>
+#include <linux/workqueue.h>
+#include <linux/jiffies.h>
 
 #include "nxp_simtemp.h"
 #include "nxp_simtemp_ioctl.h"
@@ -442,10 +460,55 @@ void simtemp_sysfs_cleanup(struct simtemp_device *simtemp)
 	sysfs_remove_group(&simtemp->misc_dev.this_device->kobj, &simtemp_attr_group);
 }
 
+static int simtemp_parse_dt(struct simtemp_device *simtemp, struct device_node *np)
+{
+	int ret;
+	
+	ret = of_property_read_u32(np, "sampling-ms", &simtemp->dt_sampling_ms);
+	if (ret) {
+		simtemp->dt_sampling_ms = SIMTEMP_DEFAULT_SAMPLING_MS;
+		simtemp_info(simtemp, "Using default sampling period: %u ms\n", 
+			     simtemp->dt_sampling_ms);
+	}
+	
+	ret = of_property_read_s32(np, "threshold-mC", &simtemp->dt_threshold_mC);
+	if (ret) {
+		simtemp->dt_threshold_mC = SIMTEMP_DEFAULT_THRESHOLD_MC;
+		simtemp_info(simtemp, "Using default threshold: %d mC\n", 
+			     simtemp->dt_threshold_mC);
+	}
+	
+	simtemp_info(simtemp, "DT config: sampling=%u ms, threshold=%d mC\n",
+		     simtemp->dt_sampling_ms, simtemp->dt_threshold_mC);
+	
+	return 0;
+}
+
 static int simtemp_probe(struct platform_device *pdev)
 {
 	struct simtemp_device *simtemp;
-
+	struct device_node *np = pdev->dev.of_node;
+	int ret;
+	
+	simtemp = devm_kzalloc(&pdev->dev, sizeof(*simtemp), GFP_KERNEL);
+	if (!simtemp)
+		return -ENOMEM;
+	
+	simtemp->pdev = pdev;
+	simtemp->dev = &pdev->dev;
+	platform_set_drvdata(pdev, simtemp);
+	
+	if (np) {
+		ret = simtemp_parse_dt(simtemp, np);
+		if (ret)
+			return ret;
+	} else {
+		simtemp->dt_sampling_ms = SIMTEMP_DEFAULT_SAMPLING_MS;
+		simtemp->dt_threshold_mC = SIMTEMP_DEFAULT_THRESHOLD_MC;
+	}
+	
+	simtemp->sampling_ms = simtemp->dt_sampling_ms;
+	simtemp->threshold_mC = simtemp->dt_threshold_mC;
 	simtemp->mode = SIMTEMP_MODE_NORMAL;
 	simtemp->enabled = false;
 	simtemp->last_temp_mC = SIMTEMP_BASE_TEMP_MC;
@@ -456,12 +519,63 @@ static int simtemp_probe(struct platform_device *pdev)
 	atomic_set(&simtemp->open_count, 0);
 	
 	INIT_KFIFO(simtemp->sample_buffer);
-
+	
+	hrtimer_init(&simtemp->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	simtemp->timer.function = simtemp_timer_callback;
+	INIT_WORK(&simtemp->sample_work, simtemp_sample_work);
+	
+	simtemp->misc_dev.minor = MISC_DYNAMIC_MINOR;
+	simtemp->misc_dev.name = "simtemp";
+	simtemp->misc_dev.fops = &simtemp_fops;
+	simtemp->misc_dev.parent = &pdev->dev;
+	
+	ret = misc_register(&simtemp->misc_dev);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to register misc device: %d\n", ret);
+		return ret;
+	}
+	
+	ret = simtemp_sysfs_init(simtemp);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to create sysfs attributes: %d\n", ret);
+		misc_deregister(&simtemp->misc_dev);
+		return ret;
+	}
+	
+	g_simtemp_dev = simtemp;
 	
 	dev_info(&pdev->dev, "NXP simtemp driver probed successfully\n");
 	
 	return 0;
 }
+
+static void simtemp_remove(struct platform_device *pdev)
+{
+	struct simtemp_device *simtemp = platform_get_drvdata(pdev);
+	
+	mutex_lock(&simtemp->config_lock);
+	simtemp->enabled = false;
+	mutex_unlock(&simtemp->config_lock);
+	
+	hrtimer_cancel(&simtemp->timer);
+	cancel_work_sync(&simtemp->sample_work);
+	
+	wake_up_interruptible_all(&simtemp->wait_queue);
+	
+	simtemp_sysfs_cleanup(simtemp);
+	
+	misc_deregister(&simtemp->misc_dev);
+	
+	g_simtemp_dev = NULL;
+	
+	dev_info(&pdev->dev, "NXP simtemp driver removed\n");
+}
+
+static const struct of_device_id simtemp_of_match[] = {
+	{ .compatible = "nxp,simtemp" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, simtemp_of_match);
 
 static struct platform_driver simtemp_driver = {
 	.probe = simtemp_probe,
@@ -472,18 +586,51 @@ static struct platform_driver simtemp_driver = {
 	},
 };
 
+static struct platform_device *simtemp_pdev = NULL;
+
+static void simtemp_device_release(struct device *dev)
+{
+	/* Nothing to do */
+}
 
 static int __init simtemp_init(void)
 {
-	pr_info("NXP Simulated Temperature Sensor Driver Initializing\n");
+	int ret;
 
+	pr_info("NXP Simulated Temperature Sensor Driver Initializing\n");
+	
+	ret = platform_driver_register(&simtemp_driver);
+	if (ret) {
+		pr_err("nxp-simtemp: Failed to register platform driver: %d\n", ret);
+		return ret;
+	}
+	
+	simtemp_pdev = platform_device_alloc("nxp-simtemp", -1);
+	if (!simtemp_pdev) {
+		platform_driver_unregister(&simtemp_driver);
+		return -ENOMEM;
+	}
+	
+	simtemp_pdev->dev.release = simtemp_device_release;
+	
+	ret = platform_device_add(simtemp_pdev);
+	if (ret) {
+		platform_device_put(simtemp_pdev);
+		platform_driver_unregister(&simtemp_driver);
+		return ret;
+	}
+	
 	pr_info("nxp-simtemp: Module loaded successfully\n");
 	return 0;
 }
 
-
 static void __exit simtemp_exit(void)
 {
+	if (simtemp_pdev)
+		platform_device_unregister(simtemp_pdev);
+	
+	platform_driver_unregister(&simtemp_driver);
+	
 	pr_info("nxp-simtemp: Module unloaded\n");
 }
 
