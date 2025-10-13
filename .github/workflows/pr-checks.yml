@@ -1,0 +1,46 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Always run basic validation (fast checks)
+  quick-validation:
+    name: "Quick Validation"
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check PR title and description
+        run: |
+          # Check PR has a meaningful title
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          if [ ${#PR_TITLE} -lt 10 ]; then
+            echo "⚠️  PR title might be too short: '$PR_TITLE'"
+          else
+            echo "✓ PR title looks good: '$PR_TITLE'"
+          fi
+          
+          # Check PR has description
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ] || [ ${#PR_BODY} -lt 20 ]; then
+            echo "⚠️  PR description is very short or missing"
+            echo "Consider adding details about what changed and why"
+          else
+            echo "✓ PR has description"
+          fi
+          
+          
+      # Placeholder for future lint.sh integration
+      - name: Run linting checks (Future)
+        run: |
+          echo "Will call scripts/lint.sh when available"
+
+  
