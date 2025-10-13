@@ -12,7 +12,7 @@ jobs:
   # Always run basic validation (fast checks)
   quick-validation:
     name: "Quick Validation"
-    runs-on: "ubuntu-nxp-latest"
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
     if: github.event.pull_request.draft == false
     steps:
       - name: Checkout code
