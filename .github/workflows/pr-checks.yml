@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for accurate diff
         
       - name: Check PR title and description
         run: |
@@ -37,10 +39,17 @@ jobs:
             echo "✓ PR has description"
           fi
           
-          
-      # Placeholder for future lint.sh integration
-      - name: Run linting checks (Future)
+      - name: Bootstrap venv 
         run: |
-          echo "Will call scripts/lint.sh when available"
+          python3 --version
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install flake8 pylint
+          # make console scripts visible to later steps
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      - name: Run smart linting checks
+        run: |
+          bash scripts/lint.sh --changed-only --base-branch ${{ github.base_ref }}
   
