@@ -43,6 +43,42 @@ SIMTEMP_MODE_NORMAL = 0
 SIMTEMP_MODE_NOISY  = 1
 SIMTEMP_MODE_RAMP   = 2
 
+# Define structures matching kernel
+class SimtempSample(Structure):
+    _fields_ = [
+        ("timestamp_ns", c_uint64),
+        ("temp_mC", c_int32),
+        ("flags", c_uint32),
+    ]
+    _pack_ = 1
+
+class SimtempConfig(Structure):
+    _fields_ = [
+        ("sampling_ms", c_uint32),
+        ("threshold_mC", c_int32),
+        ("mode", c_uint32),
+        ("flags", c_uint32),
+    ]
+
+class SimtempStats(Structure):
+    _fields_ = [
+        ("updates", c_uint64),
+        ("alerts", c_uint64),
+        ("read_calls", c_uint64),
+        ("poll_calls", c_uint64),
+        ("last_error", c_int32),
+        ("buffer_usage", c_uint32),
+    ]
+
+# IOCTL commands
+SIMTEMP_IOC_GET_CONFIG      = _IOR(SIMTEMP_IOC_MAGIC, 1, sizeof(SimtempConfig))
+SIMTEMP_IOC_SET_CONFIG      = _IOW(SIMTEMP_IOC_MAGIC, 2, sizeof(SimtempConfig))
+SIMTEMP_IOC_GET_STATS       = _IOR(SIMTEMP_IOC_MAGIC, 3, sizeof(SimtempStats))
+SIMTEMP_IOC_RESET_STATS     = _IO(SIMTEMP_IOC_MAGIC, 4)
+SIMTEMP_IOC_ENABLE          = _IO(SIMTEMP_IOC_MAGIC, 5)
+SIMTEMP_IOC_DISABLE         = _IO(SIMTEMP_IOC_MAGIC, 6)
+SIMTEMP_IOC_FLUSH_BUFFER    = _IO(SIMTEMP_IOC_MAGIC, 7)
+
 MODE_NAMES = {
     SIMTEMP_MODE_NORMAL: "normal",
     SIMTEMP_MODE_NOISY: "noisy",
