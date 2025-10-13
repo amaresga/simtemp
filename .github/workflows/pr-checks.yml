@@ -38,9 +38,14 @@ jobs:
           fi
           
           
-      # Placeholder for future lint.sh integration
-      - name: Run linting checks (Future)
+      - name: Install linting dependencies
         run: |
-          echo "Will call scripts/lint.sh when available"
-
+          sudo apt-get update
+          sudo apt-get install -y shellcheck clang-format linux-source
+          pip3 install flake8 pylint
+          
+      - name: Run smart linting checks
+        run: |
+          # Run lint script in changed-files mode for faster CI
+          ./scripts/lint.sh --changed-only --base-branch ${{ github.base_ref }} --quiet
   
