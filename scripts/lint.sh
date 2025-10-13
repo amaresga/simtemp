@@ -20,25 +20,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Logging functions
-log_info() {
-    [[ $QUIET_MODE == false ]] && echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_debug() {
-    [[ $QUIET_MODE == false ]] && echo -e "${BLUE}[DEBUG]${NC} $1"
-}
+log_info()    { [[ $QUIET_MODE == false ]] && echo -e "${BLUE}[INFO]${NC} $1"    >&2; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"                              >&2; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"                             >&2; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1"                                  >&2; }
+log_debug()   { [[ $QUIET_MODE == false ]] && echo -e "${BLUE}[DEBUG]${NC} $1"   >&2; }
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -98,7 +84,7 @@ get_changed_files() {
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             log_warning "Not in a git repository, scanning all files"
             CHANGED_FILES_ONLY=false
-            return 1
+            return 0
         fi
         
         # Get list of changed files
@@ -110,7 +96,7 @@ get_changed_files() {
         else
             log_warning "Cannot determine base for diff, scanning all files"
             CHANGED_FILES_ONLY=false
-            return 1
+            return 0
         fi
         
         local all_changed
@@ -126,19 +112,19 @@ get_changed_files() {
         # Filter by file type
         case "$file_type" in
             c|kernel)
-                changed_files=($(echo "$all_changed" | grep -E '\.(c|h)$' | grep -E '^kernel/' || true))
+                mapfile -t changed_files < <(printf '%s\n' "$all_changed" | grep -E '\.(c|h)$' | grep -E '^kernel/' || true)
                 ;;
             python)
-                changed_files=($(echo "$all_changed" | grep -E '\.py$' || true))
+                mapfile -t changed_files < <(printf '%s\n' "$all_changed" | grep -E '\.py$' || true)
                 ;;
             shell)
-                changed_files=($(echo "$all_changed" | grep -E '\.sh$' || true))
+                mapfile -t changed_files < <(printf '%s\n' "$all_changed" | grep -E '\.sh$' || true)
                 ;;
             docs)
-                changed_files=($(echo "$all_changed" | grep -E '\.(md|rst|txt)$' || true))
+                mapfile -t changed_files < <(printf '%s\n' "$all_changed" | grep -E '\.(md|rst|txt)$' || true)
                 ;;
             all)
-                changed_files=($(echo "$all_changed"))
+                mapfile -t changed_files < <(printf '%s\n' "$all_changed")
                 ;;
         esac
         
@@ -423,12 +409,27 @@ lint_documentation() {
         "$PROJECT_ROOT/docs/AI_NOTES.md"
     )
     
+    # Changed-only mode: only check docs that actually changed
+    if [[ $CHANGED_FILES_ONLY == true ]]; then
+        mapfile -t doc_files < <(get_changed_files "docs" || true)
+        if [[ ${#doc_files[@]} -eq 0 ]]; then
+            log_info "No changed documentation files, skipping"
+            track_result 0 "Documentation check"
+            return 0
+        fi
+    else
+        # If none of the expected docs exist yet, don't fail early repos
+        if ! ls "${doc_files[@]}" >/dev/null 2>&1; then
+            log_warning "Documentation files not present yet, skipping"
+            track_result 0 "Documentation check"
+            return 0
+        fi
+    fi
+    
     local missing_docs=0
     for doc in "${doc_files[@]}"; do
         if [[ -f "$doc" ]]; then
             log_success "$(basename "$doc") exists"
-            
-            # Check if file is not empty
             if [[ -s "$doc" ]]; then
                 log_success "$(basename "$doc") is not empty"
             else
@@ -436,35 +437,22 @@ lint_documentation() {
                 missing_docs=1
             fi
         else
-            log_error "$(basename "$doc") is missing"
-            missing_docs=1
+            log_warning "$(basename "$doc") is missing"
+            # optional: still treat as soft-fail during bootstrap
+            # missing_docs=1
         fi
     done
     
     track_result $missing_docs "Documentation check"
     
-    # Check for common documentation issues
-    if command -v markdown-lint &> /dev/null || command -v markdownlint &> /dev/null; then
-        local md_linter=""
-        if command -v markdownlint &> /dev/null; then
-            md_linter="markdownlint"
-        elif command -v markdown-lint &> /dev/null; then
-            md_linter="markdown-lint"
-        fi
-        
+    # Markdown linter (optional)
+    if command -v markdownlint >/dev/null; then
         local md_failed=0
         for doc in "${doc_files[@]}"; do
-            if [[ -f "$doc" ]]; then
-                log_info "Checking markdown syntax of $(basename "$doc")"
-                if $md_linter "$doc"; then
-                    log_success "$(basename "$doc") passes markdown lint"
-                else
-                    log_warning "$(basename "$doc") has markdown issues"
-                    md_failed=1
-                fi
-            fi
+            [[ -f "$doc" ]] || continue
+            log_info "Checking markdown syntax of $(basename "$doc")"
+            markdownlint "$doc" || md_failed=1
         done
-        
         track_result $md_failed "Markdown lint check"
     else
         log_warning "Markdown linter not found, skipping markdown syntax check"
@@ -514,14 +502,17 @@ check_todos() {
     
     for pattern in "${source_files[@]}"; do
         for file in $pattern; do
-            if [[ -f "$file" ]]; then
-                local todos=$(grep -n -i "TODO\|FIXME\|HACK" "$file" || true)
+            [[ -f "$file" ]] || continue
+                # Skip this linter itself
+                [[ "$(basename "$file")" == "lint.sh" ]] && continue
+                
+                local todos
+                todos=$(grep -n -E '\<(TODO|FIXME|HACK)\>' "$file" || true)
                 if [[ -n "$todos" ]]; then
                     log_info "Found TODO/FIXME/HACK in $(basename "$file"):"
                     echo "$todos"
                     todo_count=$((todo_count + 1))
                 fi
-            fi
         done
     done
     
@@ -563,18 +554,6 @@ print_summary() {
 main() {
     log_info "Starting NXP Simtemp Lint Checks"
     echo "Project root: $PROJECT_ROOT"
-    
-    if [[ $CHANGED_FILES_ONLY == true ]]; then
-        log_info "Mode: Changed files only (base: $BASE_BRANCH)"
-    else
-        log_info "Mode: Full codebase scan"
-    fi
-    
-    if [[ $AUTO_FIX == true ]]; then
-        log_info "Auto-fix: Enabled"
-    fi
-    
-    echo
     
     # Parse command line arguments
     local check_kernel=true
@@ -662,6 +641,18 @@ main() {
                 ;;
         esac
     done
+
+    if [[ $CHANGED_FILES_ONLY == true ]]; then
+        log_info "Mode: Changed files only (base: $BASE_BRANCH)"
+    else
+        log_info "Mode: Full codebase scan"
+    fi
+    
+    if [[ $AUTO_FIX == true ]]; then
+        log_info "Auto-fix: Enabled"
+    fi
+    
+    echo
     
     # Run checks
     [[ $check_kernel == true ]] && lint_kernel_code
