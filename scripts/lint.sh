@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 # NXP Simtemp Lint Script
-# 
+#
 # This script runs various code quality checks on the simtemp project:
 # - checkpatch.pl for kernel code
 # - clang-format for code formatting
 # - Python linting with flake8/pylint
 # - Shell script linting with shellcheck
-# 
+#
 # Copyright (c) 2025 Armando Mares
 
 set -e  # Exit on any error
@@ -61,14 +61,14 @@ find_checkpatch() {
         "/usr/share/kernel-checkpatch/checkpatch.pl"
         "$(which checkpatch.pl 2>/dev/null || echo "")"
     )
-    
+
     for path in "${checkpatch_paths[@]}"; do
         if [[ -f "$path" ]]; then
             echo "$path"
             return 0
         fi
     done
-    
+
     return 1
 }
 
@@ -76,17 +76,17 @@ find_checkpatch() {
 get_changed_files() {
     local file_type="$1"  # c, python, shell, docs, all
     local changed_files=()
-    
+
     if [[ $CHANGED_FILES_ONLY == true ]]; then
         log_debug "Detecting changed files against $BASE_BRANCH"
-        
+
         # Check if we're in a git repository
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             log_warning "Not in a git repository, scanning all files"
             CHANGED_FILES_ONLY=false
             return 0
         fi
-        
+
         # Get list of changed files
         local git_diff_cmd=""
         if git show-ref --verify --quiet refs/heads/"$BASE_BRANCH"; then
@@ -98,17 +98,17 @@ get_changed_files() {
             CHANGED_FILES_ONLY=false
             return 0
         fi
-        
+
         local all_changed
         all_changed=$($git_diff_cmd 2>/dev/null || echo "")
-        
+
         if [[ -z "$all_changed" ]]; then
             log_info "No changed files detected"
             return 0
         fi
-        
+
         log_debug "Changed files detected: $(echo "$all_changed" | wc -l) files"
-        
+
         # Filter by file type
         case "$file_type" in
             c|kernel)
@@ -127,7 +127,7 @@ get_changed_files() {
                 mapfile -t changed_files < <(printf '%s\n' "$all_changed")
                 ;;
         esac
-        
+
         # Convert relative paths to absolute paths
         local abs_files=()
         for file in "${changed_files[@]}"; do
@@ -135,7 +135,7 @@ get_changed_files() {
                 abs_files+=("$PROJECT_ROOT/$file")
             fi
         done
-        
+
         printf '%s\n' "${abs_files[@]}"
     fi
 }
@@ -143,13 +143,13 @@ get_changed_files() {
 # Check tool versions
 check_tool_versions() {
     log_info "Checking tool versions:"
-    
+
     command -v python3 >/dev/null && log_info "Python: $(python3 --version 2>&1)"
     command -v flake8 >/dev/null && log_info "Flake8: $(flake8 --version 2>&1 | head -n1)"
     command -v pylint >/dev/null && log_info "Pylint: $(pylint --version 2>&1 | head -n1)"
     command -v shellcheck >/dev/null && log_info "Shellcheck: $(shellcheck --version | grep version | head -n1)"
     command -v clang-format >/dev/null && log_info "Clang-format: $(clang-format --version)"
-    
+
     local checkpatch
     if checkpatch=$(find_checkpatch); then
         log_info "Checkpatch: Found at $checkpatch"
@@ -162,9 +162,9 @@ check_tool_versions() {
 # Check kernel code with checkpatch.pl
 lint_kernel_code() {
     log_info "Linting kernel code with checkpatch.pl"
-    
+
     local kernel_files=()
-    
+
     # Get files to check
     if [[ $CHANGED_FILES_ONLY == true ]]; then
         mapfile -t kernel_files < <(get_changed_files "kernel")
@@ -180,24 +180,42 @@ lint_kernel_code() {
             "$PROJECT_ROOT/kernel/nxp_simtemp_ioctl.h"
         )
     fi
-    
+
     local checkpatch
     if checkpatch=$(find_checkpatch); then
         log_info "Found checkpatch at: $checkpatch"
-        
+
         local failed=0
         for file in "${kernel_files[@]}"; do
             if [[ -f "$file" ]]; then
                 log_info "Checking $(basename "$file")"
-                if perl "$checkpatch" --no-tree --file "$file" --terse; then
-                    log_success "$(basename "$file") passes checkpatch"
-                else
-                    log_warning "$(basename "$file") has checkpatch warnings/errors"
+
+                # Run checkpatch and capture output
+                local checkpatch_output
+                checkpatch_output=$(perl "$checkpatch" --no-tree --file "$file" --terse 2>&1) || true
+
+                # Check if there are any ERROR lines (not just warnings)
+                if echo "$checkpatch_output" | grep -q "ERROR:"; then
+                    # Has actual errors
+                    local error_count
+                    error_count=$(echo "$checkpatch_output" | grep -c "ERROR:" || echo "0")
+                    log_error "$(basename "$file") has $error_count checkpatch error(s)"
+                    echo "$checkpatch_output"
                     failed=1
+                else
+                    # No errors, just warnings (or clean)
+                    log_success "$(basename "$file") passes checkpatch"
+
+                    # Show warnings but don't fail on them
+                    if echo "$checkpatch_output" | grep -q "WARNING:"; then
+                        local warning_count
+                        warning_count=$(echo "$checkpatch_output" | grep -c "WARNING:" || echo "0")
+                        log_warning "$(basename "$file") has $warning_count checkpatch warning(s) (not failing)"
+                    fi
                 fi
             fi
         done
-        
+
         track_result $failed "Kernel code checkpatch"
     else
         log_warning "checkpatch.pl not found, skipping kernel code style check"
@@ -208,10 +226,10 @@ lint_kernel_code() {
 # Check code formatting with clang-format
 lint_code_formatting() {
     log_info "Checking code formatting with clang-format"
-    
+
     if command -v clang-format &> /dev/null; then
         local kernel_files=()
-        
+
         # Get files to check
         if [[ $CHANGED_FILES_ONLY == true ]]; then
             mapfile -t kernel_files < <(get_changed_files "kernel")
@@ -227,14 +245,17 @@ lint_code_formatting() {
                 "$PROJECT_ROOT/kernel/nxp_simtemp_ioctl.h"
             )
         fi
-        
+
         local failed=0
         for file in "${kernel_files[@]}"; do
             if [[ -f "$file" ]]; then
                 log_info "Checking formatting of $(basename "$file")"
-                
+
                 # Check if file would be reformatted
-                if clang-format "$file" | diff -q "$file" - > /dev/null; then
+                local format_diff
+                format_diff=$(clang-format "$file" | diff -u "$file" - 2>/dev/null || true)
+                
+                if [[ -z "$format_diff" ]]; then
                     log_success "$(basename "$file") is properly formatted"
                 else
                     if [[ $AUTO_FIX == true ]]; then
@@ -243,13 +264,18 @@ lint_code_formatting() {
                         log_success "$(basename "$file") formatting fixed"
                     else
                         log_warning "$(basename "$file") formatting could be improved"
+                        log_info "Formatting differences found:"
+                        echo "$format_diff" | head -20  # Show first 20 lines of diff
+                        if [[ $(echo "$format_diff" | wc -l) -gt 20 ]]; then
+                            log_info "... (showing first 20 lines, use --fix to auto-format)"
+                        fi
                         log_info "Run with --fix to auto-format files"
                         failed=1
                     fi
                 fi
             fi
         done
-        
+
         track_result $failed "Code formatting check"
     else
         log_warning "clang-format not found, skipping formatting check"
@@ -260,9 +286,9 @@ lint_code_formatting() {
 # Check Python code
 lint_python_code() {
     log_info "Linting Python code"
-    
+
     local python_files=()
-    
+
     # Get files to check
     if [[ $CHANGED_FILES_ONLY == true ]]; then
         mapfile -t python_files < <(get_changed_files "python")
@@ -277,7 +303,7 @@ lint_python_code() {
             "$PROJECT_ROOT/user/gui/app.py"
         )
     fi
-    
+
     # Check syntax first
     local syntax_failed=0
     for file in "${python_files[@]}"; do
@@ -291,9 +317,9 @@ lint_python_code() {
             fi
         fi
     done
-    
+
     track_result $syntax_failed "Python syntax check"
-    
+
     # Check with flake8 if available
     if command -v flake8 &> /dev/null; then
         local flake8_failed=0
@@ -308,13 +334,13 @@ lint_python_code() {
                 fi
             fi
         done
-        
+
         track_result $flake8_failed "Python flake8 check"
     else
         log_warning "flake8 not found, skipping Python style check"
         log_info "To install: pip3 install flake8"
     fi
-    
+
     # Check with pylint if available
     if command -v pylint &> /dev/null; then
         local pylint_failed=0
@@ -330,7 +356,7 @@ lint_python_code() {
                 fi
             fi
         done
-        
+
         track_result $pylint_failed "Python pylint check"
     else
         log_warning "pylint not found, skipping advanced Python analysis"
@@ -341,9 +367,9 @@ lint_python_code() {
 # Check shell scripts
 lint_shell_scripts() {
     log_info "Linting shell scripts"
-    
+
     local shell_scripts=()
-    
+
     # Get files to check
     if [[ $CHANGED_FILES_ONLY == true ]]; then
         mapfile -t shell_scripts < <(get_changed_files "shell")
@@ -359,7 +385,7 @@ lint_shell_scripts() {
             "$PROJECT_ROOT/scripts/lint.sh"
         )
     fi
-    
+
     # Check syntax first
     local syntax_failed=0
     for script in "${shell_scripts[@]}"; do
@@ -373,9 +399,9 @@ lint_shell_scripts() {
             fi
         fi
     done
-    
+
     track_result $syntax_failed "Shell script syntax check"
-    
+
     # Check with shellcheck if available
     if command -v shellcheck &> /dev/null; then
         local shellcheck_failed=0
@@ -390,7 +416,7 @@ lint_shell_scripts() {
                 fi
             fi
         done
-        
+
         track_result $shellcheck_failed "Shell script shellcheck"
     else
         log_warning "shellcheck not found, skipping shell script analysis"
@@ -401,14 +427,14 @@ lint_shell_scripts() {
 # Check documentation
 lint_documentation() {
     log_info "Checking documentation"
-    
+
     local doc_files=(
         "$PROJECT_ROOT/docs/README.md"
         "$PROJECT_ROOT/docs/DESIGN.md"
         "$PROJECT_ROOT/docs/TESTPLAN.md"
         "$PROJECT_ROOT/docs/AI_NOTES.md"
     )
-    
+
     # Changed-only mode: only check docs that actually changed
     if [[ $CHANGED_FILES_ONLY == true ]]; then
         mapfile -t doc_files < <(get_changed_files "docs" || true)
@@ -425,7 +451,7 @@ lint_documentation() {
             return 0
         fi
     fi
-    
+
     local missing_docs=0
     for doc in "${doc_files[@]}"; do
         if [[ -f "$doc" ]]; then
@@ -442,9 +468,9 @@ lint_documentation() {
             # missing_docs=1
         fi
     done
-    
+
     track_result $missing_docs "Documentation check"
-    
+
     # Markdown linter (optional)
     if command -v markdownlint >/dev/null; then
         local md_failed=0
@@ -463,7 +489,7 @@ lint_documentation() {
 # Check file permissions
 check_file_permissions() {
     log_info "Checking file permissions"
-    
+
     local executable_files=(
         "$PROJECT_ROOT/scripts/build.sh"
         "$PROJECT_ROOT/scripts/run_demo.sh"
@@ -471,7 +497,7 @@ check_file_permissions() {
         "$PROJECT_ROOT/user/cli/main.py"
         "$PROJECT_ROOT/user/gui/app.py"
     )
-    
+
     local perm_failed=0
     for file in "${executable_files[@]}"; do
         if [[ -f "$file" ]]; then
@@ -483,14 +509,14 @@ check_file_permissions() {
             fi
         fi
     done
-    
+
     track_result $perm_failed "File permissions check"
 }
 
 # Check for TODO/FIXME/HACK comments
 check_todos() {
     log_info "Checking for TODO/FIXME/HACK comments"
-    
+
     local todo_count=0
     local source_files=(
         "$PROJECT_ROOT/kernel/"*.c
@@ -499,13 +525,13 @@ check_todos() {
         "$PROJECT_ROOT/user/gui/"*.py
         "$PROJECT_ROOT/scripts/"*.sh
     )
-    
+
     for pattern in "${source_files[@]}"; do
         for file in $pattern; do
             [[ -f "$file" ]] || continue
                 # Skip this linter itself
                 [[ "$(basename "$file")" == "lint.sh" ]] && continue
-                
+
                 local todos
                 todos=$(grep -n -E '\<(TODO|FIXME|HACK)\>' "$file" || true)
                 if [[ -n "$todos" ]]; then
@@ -515,7 +541,7 @@ check_todos() {
                 fi
         done
     done
-    
+
     if [[ $todo_count -eq 0 ]]; then
         log_success "No TODO/FIXME/HACK comments found"
         track_result 0 "TODO/FIXME check"
@@ -535,7 +561,7 @@ print_summary() {
     echo "Passed: $PASSED_CHECKS"
     echo "Failed: $FAILED_CHECKS"
     echo
-    
+
     if [[ $FAILED_CHECKS -eq 0 ]]; then
         log_success "All lint checks passed!"
         return 0
@@ -554,7 +580,7 @@ print_summary() {
 main() {
     log_info "Starting NXP Simtemp Lint Checks"
     echo "Project root: $PROJECT_ROOT"
-    
+
     # Parse command line arguments
     local check_kernel=true
     local check_python=true
@@ -562,7 +588,7 @@ main() {
     local check_docs=true
     local check_perms=true
     local check_todos=true
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --kernel-only)
@@ -647,13 +673,13 @@ main() {
     else
         log_info "Mode: Full codebase scan"
     fi
-    
+
     if [[ $AUTO_FIX == true ]]; then
         log_info "Auto-fix: Enabled"
     fi
-    
+
     echo
-    
+
     # Run checks
     [[ $check_kernel == true ]] && lint_kernel_code
     [[ $check_kernel == true ]] && lint_code_formatting
@@ -662,7 +688,7 @@ main() {
     [[ $check_docs == true ]] && lint_documentation
     [[ $check_perms == true ]] && check_file_permissions
     [[ $check_todos == true ]] && check_todos
-    
+
     # Print summary and exit with appropriate code
     print_summary
 }
