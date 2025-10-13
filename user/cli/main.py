@@ -319,8 +319,113 @@ def test_threshold_alert(device, test_threshold=None):
         return False
     
 def main():
-    print("Simtemp CLI started.")
-    # TODO: Implement CLI logic here
+    parser = argparse.ArgumentParser(description="NXP Simtemp CLI Application")
+    parser.add_argument("--device", default="/dev/simtemp", help="Device path")
+    parser.add_argument("--sampling", type=int, help="Set sampling period (ms)")
+    parser.add_argument("--threshold", type=float, help="Set threshold temperature (°C)")
+    parser.add_argument("--mode", choices=["normal", "noisy", "ramp"], help="Set simulation mode")
+    parser.add_argument("--enable", action="store_true", help="Enable device")
+    parser.add_argument("--disable", action="store_true", help="Disable device")
+    parser.add_argument("--monitor", action="store_true", help="Monitor temperature readings")
+    parser.add_argument("--duration", type=float, help="Monitoring duration (seconds)")
+    parser.add_argument("--samples", type=int, help="Maximum number of samples to read")
+    parser.add_argument("--test", action="store_true", help="Run threshold alert test")
+    parser.add_argument("--test-threshold", type=float, help="Threshold for test (°C)")
+    parser.add_argument("--stats", action="store_true", help="Show device statistics")
+    parser.add_argument("--config", action="store_true", help="Show current configuration")
+    
+    args = parser.parse_args()
+    
+    # Create device interface
+    device = SimtempDevice(args.device)
+    
+    # Check if device exists
+    if not os.path.exists(args.device):
+        print(f"Error: Device {args.device} not found")
+        print("Make sure the nxp_simtemp module is loaded")
+        return 1
+    
+    # Configuration operations (don't require device to be open)
+    if args.sampling is not None:
+        if device.set_sampling_period(args.sampling):
+            print(f"Sampling period set to {args.sampling} ms")
+        else:
+            print("Failed to set sampling period")
+            return 1
+    
+    if args.threshold is not None:
+        threshold_mc = int(args.threshold * 1000)
+        if device.set_threshold(threshold_mc):
+            print(f"Threshold set to {args.threshold:.1f}°C")
+        else:
+            print("Failed to set threshold")
+            return 1
+    
+    if args.mode is not None:
+        if device.set_mode(args.mode):
+            print(f"Mode set to {args.mode}")
+        else:
+            print("Failed to set mode")
+            return 1
+    
+    if args.enable:
+        if device.enable_device():
+            print("Device enabled")
+        else:
+            print("Failed to enable device")
+            return 1
+    
+    if args.disable:
+        if device.disable_device():
+            print("Device disabled")
+        else:
+            print("Failed to disable device")
+            return 1
+    
+    if args.stats:
+        stats = device.get_stats()
+        if stats:
+            print("Device Statistics:")
+            for key, value in stats.items():
+                print(f"  {key}: {value}")
+        else:
+            print("Failed to get device statistics")
+            return 1
+    
+    if args.config:
+        print("Current Configuration:")
+        for attr in ["sampling_ms", "threshold_mC", "mode", "enabled"]:
+            value = device.get_sysfs_value(attr)
+            if value is not None:
+                if attr == "threshold_mC":
+                    print(f"  {attr}: {value} ({int(value)/1000:.1f}°C)")
+                else:
+                    print(f"  {attr}: {value}")
+            else:
+                print(f"  {attr}: <unable to read>")
+    
+    # Operations that require device to be open
+    if args.monitor or args.test:
+        if not device.open():
+            return 1
+        
+        try:
+            if args.test:
+                test_threshold_mc = None
+                if args.test_threshold is not None:
+                    test_threshold_mc = int(args.test_threshold * 1000)
+                
+                success = test_threshold_alert(device, test_threshold_mc)
+                return 0 if success else 1
+            
+            if args.monitor:
+                sample_count = monitor_temperature(device, args.duration, args.samples)
+                print(f"\nRead {sample_count} samples")
+        
+        finally:
+            device.close()
+    
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
