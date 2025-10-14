@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # NXP Simtemp Build Script
-# 
+#
 # This script builds the kernel module and user applications.
 # It performs environment checks and provides helpful error messages.
-# 
+#
 # Copyright (c) 2025 Armando Mares
 
 set -e  # Exit on any error
@@ -47,11 +47,12 @@ fi
 
 # Check if we have kernel headers
 check_kernel_headers() {
-    local kernel_version=$(uname -r)
+    local kernel_version
+    kernel_version=$(uname -r)
     local kdir="/lib/modules/$kernel_version/build"
-    
+
     log_info "Checking kernel headers for version $kernel_version"
-    
+
     if [[ ! -d "$kdir" ]]; then
         log_error "Kernel headers not found at $kdir"
         log_error "Please install kernel headers for your current kernel:"
@@ -60,12 +61,12 @@ check_kernel_headers() {
         log_error "  Fedora:        sudo dnf install kernel-devel"
         return 1
     fi
-    
+
     if [[ ! -f "$kdir/Makefile" ]]; then
         log_error "Kernel build system not found. Headers may be incomplete."
         return 1
     fi
-    
+
     log_success "Kernel headers found at $kdir"
     return 0
 }
@@ -73,7 +74,7 @@ check_kernel_headers() {
 # Check build tools - make sure we have the basic compilation toolchain
 check_build_tools() {
     log_info "Checking build tools"
-    
+
     local tools=("make" "gcc")
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
@@ -85,7 +86,7 @@ check_build_tools() {
             return 1
         fi
     done
-    
+
     log_success "Build tools available"
     return 0
 }
@@ -93,43 +94,45 @@ check_build_tools() {
 # Check Python setup - verify Python 3 is available for the CLI tool
 check_python() {
     log_info "Checking Python environment"
-    
+
     if ! command -v python3 &> /dev/null; then
         log_error "Python 3 is required but not installed"
         return 1
     fi
-    
-    local python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
+
+    local python_version
+    python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
     log_success "Python $python_version found"
-    
+
     # Check if we can import required modules
     if ! python3 -c "import sys, os, struct, select, time, argparse, signal, datetime, typing, fcntl, ctypes" 2>/dev/null; then
         log_warning "Some Python modules may not be available. CLI app might not work properly."
     fi
-    
+
     return 0
 }
 
 # Build kernel module - Runs 'make clean' then 'make' in kernel directory, validates output
 build_kernel_module() {
     log_info "Building kernel module"
-    
+
     cd "$PROJECT_ROOT/kernel"
-    
+
     # Clean first
     if make clean &> /dev/null; then
         log_info "Cleaned previous build"
     fi
-    
+
     # Build
     if make; then
         log_success "Kernel module built successfully"
-        
+
         # Check if module was created
         if [[ -f "nxp_simtemp.ko" ]]; then
-            local module_size=$(stat -c%s "nxp_simtemp.ko")
+            local module_size
+            module_size=$(stat -c%s "nxp_simtemp.ko")
             log_info "Module size: $module_size bytes"
-            
+
             # Check basic module info
             if command -v modinfo &> /dev/null; then
                 log_info "Module information:"
@@ -143,14 +146,14 @@ build_kernel_module() {
         log_error "Kernel module build failed"
         return 1
     fi
-    
+
     return 0
 }
 
 # Set up user applications - prepare the CLI tool for execution
 setup_user_apps() {
     log_info "Setting up user applications"
-    
+
     # Make CLI executable
     local cli_script="$PROJECT_ROOT/user/cli/main.py"
     if [[ -f "$cli_script" ]]; then
@@ -160,23 +163,23 @@ setup_user_apps() {
         log_error "CLI script not found at $cli_script"
         return 1
     fi
-    
+
     return 0
 }
 
 # Validate build - double-check everything compiled correctly
 validate_build() {
     log_info "Validating build"
-    
+
     local kernel_module="$PROJECT_ROOT/kernel/nxp_simtemp.ko"
     local cli_app="$PROJECT_ROOT/user/cli/main.py"
-    
+
     # Check kernel module
     if [[ ! -f "$kernel_module" ]]; then
         log_error "Kernel module not found: $kernel_module"
         return 1
     fi
-    
+
     # Check if module is loadable (basic validation)
     if command -v modinfo &> /dev/null; then
         if modinfo "$kernel_module" &> /dev/null; then
@@ -186,18 +189,18 @@ validate_build() {
             return 1
         fi
     fi
-    
+
     # Check CLI app
     if [[ ! -f "$cli_app" ]]; then
         log_error "CLI application not found: $cli_app"
         return 1
     fi
-    
+
     if [[ ! -x "$cli_app" ]]; then
         log_error "CLI application is not executable"
         return 1
     fi
-    
+
     # Basic syntax check
     if python3 -m py_compile "$cli_app" 2>/dev/null; then
         log_success "CLI application passes syntax check"
@@ -205,7 +208,7 @@ validate_build() {
         log_error "CLI application has syntax errors"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -230,16 +233,16 @@ print_usage_info() {
 
 # Main build process - orchestrates the entire build sequence
 main() {
-    local start_time=$(date +%s)
-    
+    local start_time
+    start_time=$(date +%s)
+
     # Parse command line arguments
-    local verbose=false
     local clean_only=false
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             -v|--verbose)
-                verbose=true
+                # Verbose mode could be implemented later
                 shift
                 ;;
             -c|--clean)
@@ -260,7 +263,7 @@ main() {
                 ;;
         esac
     done
-    
+
     # Clean mode
     if [[ "$clean_only" == true ]]; then
         log_info "Cleaning build artifacts"
@@ -269,20 +272,21 @@ main() {
         log_success "Clean completed"
         exit 0
     fi
-    
+
     # Run checks
     check_kernel_headers || exit 1
     check_build_tools || exit 1
     check_python || exit 1
-    
+
     # Build
     build_kernel_module || exit 1
     setup_user_apps || exit 1
     validate_build || exit 1
-    
-    local end_time=$(date +%s)
+
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
-    
+
     log_success "Build completed in ${duration} seconds"
     print_usage_info
 }
