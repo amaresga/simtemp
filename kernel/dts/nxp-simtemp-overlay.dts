@@ -1,0 +1,31 @@
+/*
+ * Example Device Tree overlay for NXP Simulated Temperature Sensor
+ *
+ * This overlay can be used to add the simtemp device to an existing
+ * device tree without modifying the base DTS files.
+ *
+ * To compile: dtc -@ -I dts -O dtb -o nxp-simtemp-overlay.dtbo nxp-simtemp-overlay.dts
+ * To apply: echo nxp-simtemp-overlay.dtbo > /sys/kernel/config/device-tree/overlays/simtemp/path
+ *
+ * Copyright (c) 2025 Armando Mares
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "nxp,simtemp-overlay";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			simtemp_test: simtemp@0 {
+				compatible = "nxp,simtemp";
+				sampling-ms = <100>;
+				threshold-mC = <45000>;
+				status = "okay";
+				device-name = "simtemp_overlay";
+			};
+		};
+	};
+};
