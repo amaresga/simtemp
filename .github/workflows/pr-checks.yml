@@ -1,0 +1,54 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Always run basic validation (fast checks)
+  quick-validation:
+    name: "Quick Validation"
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for accurate diff
+
+      - name: Check PR title and description
+        run: |
+          # Check PR has a meaningful title
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          if [ ${#PR_TITLE} -lt 10 ]; then
+            echo "⚠️  PR title might be too short: '$PR_TITLE'"
+          else
+            echo "✓ PR title looks good: '$PR_TITLE'"
+          fi
+
+          # Check PR has description
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ] || [ ${#PR_BODY} -lt 20 ]; then
+            echo "⚠️  PR description is very short or missing"
+            echo "Consider adding details about what changed and why"
+          else
+            echo "✓ PR has description"
+          fi
+
+      - name: Bootstrap venv
+        run: |
+          python3 --version
+          python3 -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install flake8 pylint
+          # make console scripts visible to later steps
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run smart linting checks
+        run: |
+          bash scripts/lint.sh --changed-only --base-branch ${{ github.base_ref }}
