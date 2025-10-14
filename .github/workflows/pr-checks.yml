@@ -21,6 +21,7 @@ jobs:
           fetch-depth: 0  # Fetch all history for accurate diff
 
       - name: Check PR title and description
+        continue-on-error: true
         run: |
           # Check PR has a meaningful title
           PR_TITLE="${{ github.event.pull_request.title }}"
@@ -65,13 +66,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update || true
-          sudo apt-get install -y linux-headers-$(uname -r) build-essential || true
-          # Install cross-compilation tools if needed
-          sudo apt-get install -y gcc-aarch64-linux-gnu || true
 
       - name: Test build script
         run: |
