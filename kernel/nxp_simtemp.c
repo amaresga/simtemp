@@ -46,55 +46,49 @@ static struct simtemp_device *g_simtemp_dev;
 
 static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 {
-	static int counter;
-	int temp;
-
-	int angle = (counter * 300) % 6280;
-	int sine_approx;
+	static unsigned long counter = 0;
+	s32 temp;
+	int angle, sine_approx;
 
 	switch (simtemp->mode) {
 	case SIMTEMP_MODE_NORMAL:
-
-		if (angle < 1570)
+		/* Simple sine wave around base temperature using integer math */
+		/* Approximate sine using linear interpolation */
+		angle = (counter * 314) % 6280; /* 0 to 2*pi*1000 */
+		if (angle < 1570) /* 0 to pi/2 */
 			sine_approx = (angle * 1000) / 1570;
-		else if (angle < 4710)
+		else if (angle < 4710) /* pi/2 to 3*pi/2 */
 			sine_approx = 1000 - ((angle - 1570) * 1000) / 1570;
-		else
+		else /* 3*pi/2 to 2*pi */
 			sine_approx = -((angle - 4710) * 1000) / 1570;
-
-		temp = SIMTEMP_BASE_TEMP_MC + (10000 * sine_approx) / 1000;
+		temp = SIMTEMP_BASE_TEMP_MC + (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
 		break;
 
 	case SIMTEMP_MODE_NOISY: {
-		int noise;
-
-		get_random_bytes(&noise, sizeof(noise));
-		noise = noise % SIMTEMP_NOISE_RANGE_MC;
-
+		/* Normal mode with added noise */
+		angle = (counter * 314) % 6280;
 		if (angle < 1570)
 			sine_approx = (angle * 1000) / 1570;
 		else if (angle < 4710)
 			sine_approx = 1000 - ((angle - 1570) * 1000) / 1570;
 		else
 			sine_approx = -((angle - 4710) * 1000) / 1570;
-
-		temp = SIMTEMP_BASE_TEMP_MC +
-		       (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
-		temp += noise;
+		temp = SIMTEMP_BASE_TEMP_MC + (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
+		temp += (get_random_u32() % SIMTEMP_NOISE_RANGE_MC) -
+			(SIMTEMP_NOISE_RANGE_MC / 2);
 	} break;
 
 	case SIMTEMP_MODE_RAMP: {
-		int k = counter % 200;
-		int up = (k <= 100);
-		int frac = k % 100;
-		int ramp = up ? (frac * SIMTEMP_TEMP_RANGE_MC / 100) :
-				((200 - k) * SIMTEMP_TEMP_RANGE_MC / 100);
-		temp = SIMTEMP_BASE_TEMP_MC + ramp;
+		/* Linear ramp up and down */
+		temp = SIMTEMP_BASE_TEMP_MC +
+		       ((counter % 200) < 100 ?
+		        ((counter % 100) * SIMTEMP_TEMP_RANGE_MC / 100) :
+		        (((200 - (counter % 200)) * SIMTEMP_TEMP_RANGE_MC) / 100));
 		break;
 	}
 
 	default:
-		temp = 0;
+		temp = SIMTEMP_BASE_TEMP_MC;
 		break;
 	}
 	counter++;
@@ -258,10 +252,12 @@ static long simtemp_ioctl(struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case SIMTEMP_IOC_GET_CONFIG:
+		mutex_lock(&simtemp->config_lock);
 		config.sampling_ms = simtemp->sampling_ms;
 		config.threshold_mC = simtemp->threshold_mC;
 		config.mode = simtemp->mode;
 		config.flags = 0;
+		mutex_unlock(&simtemp->config_lock);
 
 		if (copy_to_user((void __user *)arg, &config, sizeof(config)))
 			ret = -EFAULT;
@@ -281,9 +277,11 @@ static long simtemp_ioctl(struct file *file, unsigned int cmd,
 			break;
 		}
 
+		mutex_lock(&simtemp->config_lock);
 		simtemp->sampling_ms = config.sampling_ms;
 		simtemp->threshold_mC = config.threshold_mC;
 		simtemp->mode = config.mode;
+		mutex_unlock(&simtemp->config_lock);
 		break;
 
 	case SIMTEMP_IOC_GET_STATS:
@@ -305,17 +303,21 @@ static long simtemp_ioctl(struct file *file, unsigned int cmd,
 		break;
 
 	case SIMTEMP_IOC_ENABLE:
+		mutex_lock(&simtemp->config_lock);
 		if (!simtemp->enabled) {
 			simtemp->enabled = true;
 			hrtimer_start(&simtemp->timer,
 				      ms_to_ktime(simtemp->sampling_ms),
 				      HRTIMER_MODE_REL);
 		}
+		mutex_unlock(&simtemp->config_lock);
 		break;
 
 	case SIMTEMP_IOC_DISABLE:
+		mutex_lock(&simtemp->config_lock);
 		simtemp->enabled = false;
 		hrtimer_cancel(&simtemp->timer);
+		mutex_unlock(&simtemp->config_lock);
 		break;
 
 	case SIMTEMP_IOC_FLUSH_BUFFER:
@@ -585,6 +587,9 @@ static int simtemp_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/* Set device driver data for sysfs access */
+	dev_set_drvdata(simtemp->misc_dev.this_device, simtemp);
+
 	ret = simtemp_sysfs_init(simtemp);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to create sysfs attributes: %d\n",
@@ -603,23 +608,33 @@ static int simtemp_probe(struct platform_device *pdev)
 static void simtemp_remove(struct platform_device *pdev)
 {
 	struct simtemp_device *simtemp = platform_get_drvdata(pdev);
+	unsigned long flags;
 
-	mutex_lock(&simtemp->config_lock);
-	simtemp->enabled = false;
-	mutex_unlock(&simtemp->config_lock);
+	dev_info(&pdev->dev, "Removing NXP simtemp driver...\n");
 
+	/* Step 1: Remove sysfs first to prevent new configuration */
+	simtemp_sysfs_cleanup(simtemp);
+
+	/* Step 2: Unregister device to prevent new opens */
+	misc_deregister(&simtemp->misc_dev);
+
+	/* Step 3: Stop the timer (prevents new work from being queued) */
 	hrtimer_cancel(&simtemp->timer);
-	cancel_work_sync(&simtemp->sample_work);
+
+	/* Step 4: Mark as disabled and wake up any waiters */
+	spin_lock_irqsave(&simtemp->buffer_lock, flags);
+	simtemp->enabled = false;
+	spin_unlock_irqrestore(&simtemp->buffer_lock, flags);
 
 	wake_up_interruptible_all(&simtemp->wait_queue);
 
-	simtemp_sysfs_cleanup(simtemp);
+	/* Step 5: Cancel pending work (may sleep, but safe now) */
+	cancel_work_sync(&simtemp->sample_work);
 
-	misc_deregister(&simtemp->misc_dev);
-
+	/* Step 6: Final cleanup */
 	g_simtemp_dev = NULL;
 
-	dev_info(&pdev->dev, "NXP simtemp driver removed\n");
+	dev_info(&pdev->dev, "NXP simtemp driver removed successfully\n");
 }
 
 static const struct of_device_id simtemp_of_match[] = {
