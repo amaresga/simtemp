@@ -182,6 +182,132 @@ class SimtempGUI:
         # Auto-update stats
         self.update_stats()
 
+    def setup_plot(self):
+        """Setup the temperature plot"""
+        self.ax.set_title("Temperature vs Time")
+        self.ax.set_xlabel("Time")
+        self.ax.set_ylabel("Temperature (°C)")
+        self.ax.grid(True, alpha=0.3)
+
+        # Initialize empty lines
+        self.temp_line, = self.ax.plot([], [], 'b-', label='Temperature')
+        self.threshold_line = self.ax.axhline(y=45.0, color='r', linestyle='--', alpha=0.7, label='Threshold')
+
+        self.ax.legend()
+
+        # Set up animation
+        self.anim = FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
+
+    def update_plot(self, frame):
+        """Update the temperature plot"""
+        if len(self.timestamps) > 0:
+            # Convert timestamps to matplotlib dates
+            plot_times = [mdates.date2num(ts) for ts in self.timestamps]
+
+            # Update temperature line
+            self.temp_line.set_data(plot_times, list(self.temperatures))
+
+            # Update threshold line
+            try:
+                threshold = float(self.threshold_c.get())
+                self.threshold_line.set_ydata([threshold, threshold])
+            except ValueError:
+                pass
+
+            # Auto-scale axes
+            if len(plot_times) > 1:
+                self.ax.set_xlim(min(plot_times), max(plot_times))
+                temp_min = min(self.temperatures)
+                temp_max = max(self.temperatures)
+                temp_range = temp_max - temp_min
+                if temp_range > 0:
+                    self.ax.set_ylim(temp_min - temp_range * 0.1, temp_max + temp_range * 0.1)
+
+                # Format x-axis
+                self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+                self.ax.xaxis.set_major_locator(mdates.SecondLocator(interval=10))
+
+        self.canvas.draw()
+
+    def start_monitoring(self):
+        """Start temperature monitoring"""
+        if not os.path.exists(self.device.device_path):
+            messagebox.showerror("Error", f"Device {self.device.device_path} not found.\nMake sure the nxp_simtemp module is loaded.")
+            return
+
+        if not self.device.open():
+            messagebox.showerror("Error", "Failed to open device")
+            return
+
+        self.monitoring = True
+        self.start_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
+
+        # Start monitoring thread
+        self.monitor_thread = threading.Thread(target=self.monitor_worker, daemon=True)
+        self.monitor_thread.start()
+
+    def stop_monitoring(self):
+        """Stop temperature monitoring"""
+        self.monitoring = False
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
+
+        if self.device.fd is not None:
+            self.device.close()
+
+    def monitor_worker(self):
+        """Worker thread for monitoring temperature"""
+        sample_count = 0
+        alert_count = 0
+
+        while self.monitoring:
+            try:
+                result = self.device.read_sample(timeout=0.5)
+                if result is None:
+                    continue
+
+                timestamp, temp_c, flags = result
+                sample_count += 1
+
+                # Update current values
+                self.current_temp.set(f"{temp_c:.1f}°C")
+                self.sample_count.set(str(sample_count))
+
+                # Check for alert
+                if flags & SIMTEMP_FLAG_THRESHOLD_CROSSED:
+                    alert_count += 1
+                    self.current_alert.set("YES")
+                    self.alert_count.set(str(alert_count))
+                    # Flash the alert for visual indication
+                    self.root.after(0, self.flash_alert)
+                else:
+                    self.current_alert.set("No")
+
+                # Add to data collections
+                self.timestamps.append(timestamp)
+                self.temperatures.append(temp_c)
+                self.alerts.append(bool(flags & SIMTEMP_FLAG_THRESHOLD_CROSSED))
+
+            except Exception as e:
+                print(f"Monitor error: {e}")
+                break
+
+    def flash_alert(self):
+        """Flash the alert indication"""
+        # This could be enhanced with color changes, sounds, etc.
+        pass
+
+    def clear_data(self):
+        """Clear collected data"""
+        self.timestamps.clear()
+        self.temperatures.clear()
+        self.alerts.clear()
+        self.sample_count.set("0")
+        self.alert_count.set("0")
+        self.current_temp.set("--.-°C")
+        self.current_alert.set("No")
+
 def main():
     # Check if required modules are available
     try:
