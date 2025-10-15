@@ -61,7 +61,8 @@ static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 			sine_approx = 1000 - ((angle - 1570) * 1000) / 1570;
 		else /* 3*pi/2 to 2*pi */
 			sine_approx = -((angle - 4710) * 1000) / 1570;
-		temp = SIMTEMP_BASE_TEMP_MC + (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
+		temp = SIMTEMP_BASE_TEMP_MC +
+		       (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
 		break;
 
 	case SIMTEMP_MODE_NOISY: {
@@ -73,7 +74,8 @@ static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 			sine_approx = 1000 - ((angle - 1570) * 1000) / 1570;
 		else
 			sine_approx = -((angle - 4710) * 1000) / 1570;
-		temp = SIMTEMP_BASE_TEMP_MC + (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
+		temp = SIMTEMP_BASE_TEMP_MC +
+		       (SIMTEMP_TEMP_RANGE_MC * sine_approx) / 1000;
 		temp += (get_random_u32() % SIMTEMP_NOISE_RANGE_MC) -
 			(SIMTEMP_NOISE_RANGE_MC / 2);
 	} break;
@@ -81,9 +83,11 @@ static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 	case SIMTEMP_MODE_RAMP: {
 		/* Linear ramp up and down */
 		temp = SIMTEMP_BASE_TEMP_MC +
-		       ((counter % 200) < 100 ?
-		        ((counter % 100) * SIMTEMP_TEMP_RANGE_MC / 100) :
-		        (((200 - (counter % 200)) * SIMTEMP_TEMP_RANGE_MC) / 100));
+		       ((counter % 200) < 100 ? ((counter % 100) *
+						 SIMTEMP_TEMP_RANGE_MC / 100) :
+						(((200 - (counter % 200)) *
+						  SIMTEMP_TEMP_RANGE_MC) /
+						 100));
 		break;
 	}
 
