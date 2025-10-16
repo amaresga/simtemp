@@ -25,20 +25,27 @@ SIMTEMP_FLAG_NEW_SAMPLE = 1 << 0
 SIMTEMP_FLAG_THRESHOLD_CROSSED = 1 << 1
 
 
+# pylint: disable=invalid-name,redefined-builtin
+# IOCTL helper functions use kernel naming conventions intentionally
 def _IOC(dir, type, nr, size):
+    """Generate IOCTL command code using Linux kernel convention."""
     return (dir << 30) | (type << 8) | (nr << 0) | (size << 16)
 
 
 def _IOR(type, nr, size):
+    """Generate IOCTL read command."""
     return _IOC(2, type, nr, size)
 
 
 def _IOW(type, nr, size):
+    """Generate IOCTL write command."""
     return _IOC(1, type, nr, size)
 
 
 def _IO(type, nr):
+    """Generate IOCTL command without data transfer."""
     return _IOC(0, type, nr, 0)
+# pylint: enable=invalid-name,redefined-builtin
 
 
 SIMTEMP_MODE_NORMAL = 0
@@ -47,7 +54,10 @@ SIMTEMP_MODE_RAMP = 2
 
 
 # Define structures matching kernel
+# pylint: disable=too-few-public-methods
+# ctypes Structure classes are data containers by design
 class SimtempSample(Structure):
+    """Kernel data structure for temperature sample."""
     _fields_ = [
         ("timestamp_ns", c_uint64),
         ("temp_mC", c_int32),
@@ -57,15 +67,17 @@ class SimtempSample(Structure):
 
 
 class SimtempConfig(Structure):
+    """Kernel data structure for device configuration."""
     _fields_ = [
         ("sampling_ms", c_uint32),
-        ("threshold_mC", c_int32),
+        ("threshold_mC", c_int32),  # pylint: disable=invalid-name
         ("mode", c_uint32),
         ("flags", c_uint32),
     ]
 
 
 class SimtempStats(Structure):
+    """Kernel data structure for device statistics."""
     _fields_ = [
         ("updates", c_uint64),
         ("alerts", c_uint64),
@@ -74,6 +86,7 @@ class SimtempStats(Structure):
         ("last_error", c_int32),
         ("buffer_usage", c_uint32),
     ]
+# pylint: enable=too-few-public-methods
 
 
 # IOCTL commands
@@ -113,7 +126,8 @@ class SimtempDevice:
             if os.path.exists(path):
                 return path
 
-        # If not found, return a default and let individual operations fail gracefully
+        # If not found, return a default and let individual operations fail
+        # gracefully
         return "/sys/class/misc/simtemp"
 
     def open(self):
@@ -131,7 +145,8 @@ class SimtempDevice:
             os.close(self.fd)
             self.fd = None
 
-    def read_sample(self, timeout=None) -> Optional[Tuple[datetime, float, int]]:
+    def read_sample(
+            self, timeout=None) -> Optional[Tuple[datetime, float, int]]:
         """Read a temperature sample from the device"""
         if self.fd is None:
             return None
@@ -166,7 +181,7 @@ class SimtempDevice:
         """Set a sysfs attribute value"""
         try:
             path = os.path.join(self.sysfs_base, attribute)
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 f.write(str(value))
             return True
         except (OSError, IOError) as e:
@@ -177,7 +192,7 @@ class SimtempDevice:
         """Get a sysfs attribute value"""
         try:
             path = os.path.join(self.sysfs_base, attribute)
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         except (OSError, IOError) as e:
             print(f"Error reading {attribute}: {e}")
@@ -232,10 +247,14 @@ class SimtempDevice:
 
         try:
             config = SimtempConfig()
+            # pylint: disable=attribute-defined-outside-init,invalid-name
+            # These are ctypes Structure fields, not class attributes
+            # threshold_mC matches kernel API naming convention
             config.sampling_ms = sampling_ms
             config.threshold_mC = threshold_mc
             config.mode = mode
             config.flags = 0
+            # pylint: enable=attribute-defined-outside-init,invalid-name
 
             fcntl.ioctl(self.fd, SIMTEMP_IOC_SET_CONFIG, config)
             return True
@@ -260,11 +279,24 @@ class SimtempDevice:
             print(f"IOCTL get config error: {e}")
             return None
 
+    def flush_buffer(self):
+        """Flush the ring buffer via ioctl"""
+        if self.fd is None:
+            return False
+
+        try:
+            fcntl.ioctl(self.fd, SIMTEMP_IOC_FLUSH_BUFFER)
+            return True
+        except OSError as e:
+            print(f"IOCTL flush buffer error: {e}")
+            return False
+
 
 def format_sample(timestamp, temp_c, flags):
     """Format a temperature sample for display"""
     alert = 1 if flags & SIMTEMP_FLAG_THRESHOLD_CROSSED else 0
-    return f"{timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z temp={temp_c:.1f}C alert={alert}"
+    return (f"{timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z "
+            f"temp={temp_c:.1f}C alert={alert}")
 
 
 def monitor_temperature(device, duration=None, max_samples=None):
@@ -338,7 +370,7 @@ def test_threshold_alert(device, test_threshold=None):
             if result is None:
                 continue
 
-            timestamp, temp_c, flags = result
+            _, temp_c, flags = result
             sample_count += 1
 
             if flags & SIMTEMP_FLAG_THRESHOLD_CROSSED:
@@ -346,7 +378,9 @@ def test_threshold_alert(device, test_threshold=None):
                 alert_detected = True
                 break
 
-            print(f"Sample {sample_count}: {temp_c:.1f}°C (threshold: {test_threshold / 1000:.1f}°C)")
+            threshold_c = test_threshold / 1000
+            print(f"Sample {sample_count}: {temp_c:.1f}°C "
+                  f"(threshold: {threshold_c:.1f}°C)")
 
         # Restore original configuration
         device.set_threshold(current_threshold)
@@ -356,30 +390,69 @@ def test_threshold_alert(device, test_threshold=None):
         if alert_detected:
             print("✓ Test PASSED: Threshold alert working correctly")
             return True
-        else:
-            print("✗ Test FAILED: No threshold alert detected")
-            return False
 
-    except Exception as e:
+        print("✗ Test FAILED: No threshold alert detected")
+        return False
+
+    except (OSError, ValueError, RuntimeError) as e:
         print(f"✗ Test FAILED: Exception occurred: {e}")
         return False
 
 
+# pylint: disable=too-many-return-statements,too-many-branches,too-many-statements
+# CLI entry point requires comprehensive argument handling
 def main():
+    """CLI entry point for simtemp device operations."""
     parser = argparse.ArgumentParser(description="NXP Simtemp CLI Application")
     parser.add_argument("--device", default="/dev/simtemp", help="Device path")
-    parser.add_argument("--sampling", type=int, help="Set sampling period (ms)")
-    parser.add_argument("--threshold", type=float, help="Set threshold temperature (°C)")
-    parser.add_argument("--mode", choices=["normal", "noisy", "ramp"], help="Set simulation mode")
+    parser.add_argument(
+        "--sampling",
+        type=int,
+        help="Set sampling period (ms)")
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        help="Set threshold temperature (°C)")
+    parser.add_argument(
+        "--mode",
+        choices=[
+            "normal",
+            "noisy",
+            "ramp"],
+        help="Set simulation mode")
     parser.add_argument("--enable", action="store_true", help="Enable device")
-    parser.add_argument("--disable", action="store_true", help="Disable device")
-    parser.add_argument("--monitor", action="store_true", help="Monitor temperature readings")
-    parser.add_argument("--duration", type=float, help="Monitoring duration (seconds)")
-    parser.add_argument("--samples", type=int, help="Maximum number of samples to read")
-    parser.add_argument("--test", action="store_true", help="Run threshold alert test")
-    parser.add_argument("--test-threshold", type=float, help="Threshold for test (°C)")
-    parser.add_argument("--stats", action="store_true", help="Show device statistics")
-    parser.add_argument("--config", action="store_true", help="Show current configuration")
+    parser.add_argument(
+        "--disable",
+        action="store_true",
+        help="Disable device")
+    parser.add_argument(
+        "--monitor",
+        action="store_true",
+        help="Monitor temperature readings")
+    parser.add_argument(
+        "--duration",
+        type=float,
+        help="Monitoring duration (seconds)")
+    parser.add_argument(
+        "--samples",
+        type=int,
+        help="Maximum number of samples to read")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run threshold alert test")
+    parser.add_argument(
+        "--test-threshold",
+        type=float,
+        help="Threshold for test (°C)")
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Show device statistics")
+    parser.add_argument(
+        "--config",
+        action="store_true",
+        help="Show current configuration")
 
     args = parser.parse_args()
 
@@ -466,7 +539,8 @@ def main():
                 return 0 if success else 1
 
             if args.monitor:
-                sample_count = monitor_temperature(device, args.duration, args.samples)
+                sample_count = monitor_temperature(
+                    device, args.duration, args.samples)
                 print(f"\nRead {sample_count} samples")
 
         finally:

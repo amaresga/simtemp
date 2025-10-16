@@ -46,7 +46,7 @@ static struct simtemp_device *g_simtemp_dev;
 
 static s32 simtemp_get_base_temperature(struct simtemp_device *simtemp)
 {
-	static unsigned long counter = 0;
+	static unsigned long counter;
 	s32 temp;
 	int angle, sine_approx;
 
