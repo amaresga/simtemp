@@ -260,6 +260,18 @@ class SimtempDevice:
             print(f"IOCTL get config error: {e}")
             return None
 
+    def flush_buffer(self):
+        """Flush the ring buffer via ioctl"""
+        if self.fd is None:
+            return False
+
+        try:
+            fcntl.ioctl(self.fd, SIMTEMP_IOC_FLUSH_BUFFER)
+            return True
+        except OSError as e:
+            print(f"IOCTL flush buffer error: {e}")
+            return False
+
 
 def format_sample(timestamp, temp_c, flags):
     """Format a temperature sample for display"""
