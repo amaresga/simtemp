@@ -22,9 +22,11 @@ jobs:
 
       - name: Check PR title and description
         continue-on-error: true
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           # Check PR has a meaningful title
-          PR_TITLE="${{ github.event.pull_request.title }}"
           if [ ${#PR_TITLE} -lt 10 ]; then
             echo "⚠️  PR title might be too short: '$PR_TITLE'"
           else
@@ -32,12 +34,12 @@ jobs:
           fi
 
           # Check PR has description
-          PR_BODY="${{ github.event.pull_request.body }}"
-          if [ -z "$PR_BODY" ] || [ ${#PR_BODY} -lt 20 ]; then
+          PR_BODY_LENGTH=${#PR_BODY}
+          if [ -z "$PR_BODY" ] || [ "$PR_BODY_LENGTH" -lt 20 ]; then
             echo "⚠️  PR description is very short or missing"
             echo "Consider adding details about what changed and why"
           else
-            echo "✓ PR has description"
+            echo "✓ PR has description (${PR_BODY_LENGTH} characters)"
           fi
 
       - name: Bootstrap venv
