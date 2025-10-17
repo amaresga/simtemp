@@ -348,7 +348,6 @@ sudo ./scripts/run_demo.sh --interactive
 The project includes a complete GitHub Actions CI/CD pipeline (`.github/workflows/ci.yml`) that:
 - ✅ Builds on multiple kernel versions
 - ✅ Runs code quality checks
-- ✅ Validates documentation
 - ✅ Checks version consistency
 - ✅ Creates release artifacts
 

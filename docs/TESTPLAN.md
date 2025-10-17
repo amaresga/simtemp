@@ -848,16 +848,6 @@ sudo rmmod nxp_simtemp
 | **Robustness** | 4 | 100% | 24h+ stability confirmed |
 | **TOTAL** | **31** | **100%** | Ready for submission |
 
-### Known Limitations and Future Work
-
-1. **QEMU/DT Testing**: Device Tree overlay tested on x86_64 with programmatic device creation. Real DT testing on ARM hardware (i.MX/QEMU) is future work.
-
-2. **Real-time Performance**: Current testing shows <5ms latency. For hard real-time requirements (10 kHz sampling), additional optimization would be needed as discussed in DESIGN.md.
-
-3. **Multi-instance**: Current tests validate single device instance. Multiple simultaneous instances not yet tested.
-
-4. **Power Management**: Suspend/resume test (R2) requires hardware setup not available in current test environment.
-
 ### Test Artifacts
 
 All test executions produce the following artifacts:

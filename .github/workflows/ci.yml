@@ -33,18 +33,6 @@ jobs:
       with:
         fetch-depth: 0  # Need full history for changed-files detection
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install linting tools
-      run: |
-        pip install --upgrade pip
-        pip install flake8 pylint
-        # Install shellcheck for shell script linting
-        sudo apt-get update && sudo apt-get install -y shellcheck || true
-
     - name: Run lint script
       env:
         CI_ENVIRONMENT: true
@@ -71,11 +59,6 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y linux-headers-$(uname -r) build-essential bc kmod python3
-
     - name: Display environment
       run: |
         uname -r
@@ -95,7 +78,7 @@ jobs:
         echo "Build artifacts verified ✓"
 
     - name: Archive build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernel-module-${{ matrix.kernel }}
         path: kernel/nxp_simtemp.ko
@@ -103,20 +86,15 @@ jobs:
 
   test:
     name: Validation Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
     needs: build
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
     - name: Download build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: kernel-module-5.15
         path: kernel/
@@ -201,7 +179,7 @@ jobs:
         ls -lh release/
 
     - name: Upload release artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: simtemp-release
         path: release/simtemp-release.tar.gz
