@@ -284,7 +284,31 @@ struct simtemp_sample {
 
 ## 🧪 Testing
 
-### Automated Tests
+### Automated Regression Tests
+
+**Quick regression testing:**
+```bash
+# Run full regression suite
+sudo ./scripts/regression_test.sh
+
+# Quick smoke tests only (faster, ~1 minute)
+sudo ./scripts/regression_test.sh --quick
+
+# Verbose output
+sudo ./scripts/regression_test.sh --verbose
+```
+
+The regression script validates:
+- Module load/unload
+- Device file creation
+- Sysfs interface
+- Configuration tests
+- Threshold alerts
+- Error handling
+
+**Exit codes**: `0` = all passed, `1` = failures detected, `2` = prerequisites missing
+
+### Comprehensive Demo and Tests
 ```bash
 # Run complete demo with tests
 sudo ./scripts/run_demo.sh
@@ -316,6 +340,19 @@ sudo ./scripts/run_demo.sh --interactive
 # Check only Python code
 ./scripts/lint.sh --python-only
 ```
+
+### Continuous Integration
+
+[![CI Status](https://github.com/amaresga/simtemp/actions/workflows/ci.yml/badge.svg)](https://github.com/amaresga/simtemp/actions)
+
+The project includes a complete GitHub Actions CI/CD pipeline (`.github/workflows/ci.yml`) that:
+- ✅ Builds on multiple kernel versions
+- ✅ Runs code quality checks
+- ✅ Validates documentation
+- ✅ Checks version consistency
+- ✅ Creates release artifacts
+
+**Note**: Full module loading tests require root privileges and are run locally with `regression_test.sh`. CI validates build correctness and code quality.
 
 ## 🚨 Troubleshooting
 

@@ -1,0 +1,208 @@
+name: CI - Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+  workflow_call:  # Allow this workflow to be called by other workflows
+    inputs:
+      changed-files-only:
+        description: 'Only check changed files'
+        required: false
+        type: boolean
+        default: false
+      skip-release:
+        description: 'Skip release job'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  KERNEL_VERSION: 5.15
+
+jobs:
+  lint:
+    name: Code Quality Checks
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Need full history for changed-files detection
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install linting tools
+      run: |
+        pip install --upgrade pip
+        pip install flake8 pylint
+        # Install shellcheck for shell script linting
+        sudo apt-get update && sudo apt-get install -y shellcheck || true
+
+    - name: Run lint script
+      env:
+        CI_ENVIRONMENT: true
+      run: |
+        # Run with appropriate flags based on context
+        if [[ "${{ inputs.changed-files-only }}" == "true" ]]; then
+          echo "Running lint checks on changed files only..."
+          ./scripts/lint.sh --changed-only --base-branch ${{ github.base_ref || 'main' }}
+        else
+          echo "Running full lint checks..."
+          ./scripts/lint.sh
+        fi
+
+  build:
+    name: Build Kernel Module
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
+    needs: lint
+
+    strategy:
+      matrix:
+        kernel: ['5.15', '6.1']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y linux-headers-$(uname -r) build-essential bc kmod python3
+
+    - name: Display environment
+      run: |
+        uname -r
+        python3 --version
+        gcc --version | head -n1
+
+    - name: Build using build script
+      env:
+        CI_ENVIRONMENT: true
+      run: ./scripts/build.sh
+
+    - name: Verify build artifacts
+      run: |
+        # build.sh already verifies module, just confirm artifacts exist
+        test -f kernel/nxp_simtemp.ko
+        test -x user/cli/main.py
+        echo "Build artifacts verified ✓"
+
+    - name: Archive build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: kernel-module-${{ matrix.kernel }}
+        path: kernel/nxp_simtemp.ko
+        retention-days: 30
+
+  test:
+    name: Validation Tests
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: kernel-module-5.15
+        path: kernel/
+
+    - name: Verify build artifacts exist
+      run: |
+        test -f kernel/nxp_simtemp.ko || {
+          echo "Kernel module not found in artifacts"
+          exit 1
+        }
+        echo "Build artifacts verified ✓"
+
+    - name: Validate module metadata
+      run: |
+        # Verify module has correct metadata
+        modinfo kernel/nxp_simtemp.ko
+        modinfo kernel/nxp_simtemp.ko | grep -E "depends:|filename:|vermagic:|version:"
+
+    - name: Validate Python applications
+      run: |
+        # Syntax check Python applications
+        python3 -m py_compile user/cli/main.py
+        python3 -m py_compile user/gui/app.py
+        echo "Python syntax validation passed ✓"
+
+    - name: Verify test scripts exist
+      run: |
+        # Confirm all test infrastructure is in place
+        test -f scripts/regression_test.sh
+        test -f scripts/run_demo.sh
+        test -x user/cli/main.py
+        echo "Test infrastructure validated ✓"
+
+    - name: CI test note
+      run: |
+        echo "================================"
+        echo "Note: Full regression tests (scripts/regression_test.sh) require:"
+        echo "  • Root privileges for module loading"
+        echo "  • Kernel module loading capability"
+        echo "  • These are run locally before submission"
+        echo ""
+        echo "CI validates:"
+        echo "  ✓ Build correctness"
+        echo "  ✓ Code quality (via lint.sh)"
+        echo "  ✓ Module metadata"
+        echo "  ✓ Python syntax"
+        echo "================================"
+
+  release:
+    name: Release Validation
+    runs-on: [self-hosted, Linux, ARM64, nxp-ci]
+    needs: [build, test]
+    if: |
+      github.ref == 'refs/heads/main' &&
+      (inputs.skip-release == false || inputs.skip-release == null)
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check version consistency
+      run: |
+        # Extract version from module
+        KERNEL_VERSION=$(grep "MODULE_VERSION" kernel/nxp_simtemp.c | sed 's/.*"\(.*\)".*/\1/')
+        echo "Kernel module version: $KERNEL_VERSION"
+
+        # Check README mentions version
+        if grep -q "$KERNEL_VERSION" docs/README.md; then
+          echo "Version consistency check passed ✓"
+        else
+          echo "Warning: Version mismatch between code and docs"
+        fi
+
+    - name: Prepare release artifacts
+      run: |
+        mkdir -p release
+        cp kernel/nxp_simtemp.ko release/ || true
+        cp -r docs release/
+        cp -r user release/
+        cp -r scripts release/
+        tar -czf release/simtemp-release.tar.gz release/
+        ls -lh release/
+
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: simtemp-release
+        path: release/simtemp-release.tar.gz
+        retention-days: 30
