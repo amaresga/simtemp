@@ -120,27 +120,37 @@ jobs:
         python3 -m py_compile user/gui/app.py
         echo "Python syntax validation passed ✓"
 
+    - name: Run unit tests
+      run: |
+        # Run Python unit tests (bonus feature)
+        echo "Running unit tests for record parsing and event logic..."
+        python3 tests/test_record_parsing.py
+        echo "Unit tests passed ✓"
+
     - name: Verify test scripts exist
       run: |
         # Confirm all test infrastructure is in place
         test -f scripts/regression_test.sh
         test -f scripts/run_demo.sh
+        test -f tests/test_record_parsing.py
+        test -f tests/run_tests.sh
         test -x user/cli/main.py
         echo "Test infrastructure validated ✓"
 
     - name: CI test note
       run: |
         echo "================================"
-        echo "Note: Full regression tests (scripts/regression_test.sh) require:"
-        echo "  • Root privileges for module loading"
-        echo "  • Kernel module loading capability"
-        echo "  • These are run locally before submission"
-        echo ""
-        echo "CI validates:"
+        echo "CI Validation Complete:"
         echo "  ✓ Build correctness"
         echo "  ✓ Code quality (via lint.sh)"
         echo "  ✓ Module metadata"
         echo "  ✓ Python syntax"
+        echo "  ✓ Unit tests (record parsing & event logic)"
+        echo ""
+        echo "Note: Full regression tests (scripts/regression_test.sh) require:"
+        echo "  • Root privileges for module loading"
+        echo "  • Kernel module loading capability"
+        echo "  • These are run locally before submission"
         echo "================================"
 
   release:

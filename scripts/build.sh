@@ -209,6 +209,17 @@ validate_build() {
         return 1
     fi
 
+    # Check unit tests (optional bonus feature)
+    local unit_tests="$PROJECT_ROOT/tests/test_record_parsing.py"
+    if [[ -f "$unit_tests" ]]; then
+        log_info "Unit tests found at $unit_tests"
+        if python3 -m py_compile "$unit_tests" 2>/dev/null; then
+            log_success "Unit tests pass syntax check"
+        else
+            log_warn "Unit tests have syntax errors"
+        fi
+    fi
+
     return 0
 }
 
