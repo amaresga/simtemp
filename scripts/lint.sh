@@ -411,6 +411,7 @@ lint_shell_scripts() {
         shell_scripts=(
             "$PROJECT_ROOT/scripts/build.sh"
             "$PROJECT_ROOT/scripts/run_demo.sh"
+            "$PROJECT_ROOT/scripts/regression_test.sh"
             "$PROJECT_ROOT/scripts/lint.sh"
         )
     fi
