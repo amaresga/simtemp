@@ -155,6 +155,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: kernel-module-5.15
+        path: kernel/
+
     - name: Check version consistency
       run: |
         # Extract version from module
@@ -171,16 +177,17 @@ jobs:
     - name: Prepare release artifacts
       run: |
         mkdir -p release
-        cp kernel/nxp_simtemp.ko release/ || true
+        cp kernel/nxp_simtemp.ko release/
         cp -r docs release/
         cp -r user release/
         cp -r scripts release/
-        tar -czf release/simtemp-release.tar.gz release/
+        tar -czf simtemp-release.tar.gz release/
+        ls -lh simtemp-release.tar.gz
         ls -lh release/
 
     - name: Upload release artifacts
       uses: actions/upload-artifact@v4
       with:
         name: simtemp-release
-        path: release/simtemp-release.tar.gz
+        path: simtemp-release.tar.gz
         retention-days: 30
