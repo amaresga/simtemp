@@ -37,8 +37,9 @@ This project fulfills all requirements from the NXP Systems Software Engineer Ch
 | **IOCTL Interface** | ✅ Bonus | Advanced configuration |
 | **GUI Application** | ✅ Bonus | `user/gui/app.py` |
 | **Lint Script** | ✅ Bonus | `scripts/lint.sh` |
+| **Unit Tests** | ✅ Bonus | `tests/test_record_parsing.py` |
 
-**Coverage**: 100% core requirements + 3 bonus features
+**Coverage**: 100% core requirements + 4 bonus features
 
 ## 🚀 Quick Start
 
@@ -284,6 +285,29 @@ struct simtemp_sample {
 
 ## 🧪 Testing
 
+### Unit Tests (Bonus Feature)
+
+**Python unit tests for record parsing and event logic:**
+```bash
+# Run unit tests
+./tests/run_tests.sh
+
+# Or directly
+python3 tests/test_record_parsing.py
+
+# With pytest (if installed)
+python3 -m pytest tests/ -v
+```
+
+**Test coverage:**
+- ✅ Binary record parsing (16-byte sample structure)
+- ✅ Event flag logic (NEW_SAMPLE, THRESHOLD_CROSSED)
+- ✅ Temperature conversion (millidegrees to degrees)
+- ✅ Buffer handling (partial reads, multiple samples)
+- ✅ Edge cases (min/max values, alignment, endianness)
+
+**16 unit tests** run in ~2ms, **no kernel module required**.
+
 ### Automated Regression Tests
 
 **Quick regression testing:**
@@ -469,6 +493,7 @@ Current version: 1.0.0
 ### Beyond Requirements
 - 🎁 **GUI Dashboard**: Real-time plotting with Tkinter/matplotlib
 - 🎁 **IOCTL Interface**: Batch configuration operations
+- 🎁 **Unit Tests**: 16 tests for record parsing & event logic
 - 🎁 **Lint Script**: Automated code quality checks
 - 🎁 **CI/CD Integration**: GitHub Actions workflow
 - 🎁 **Multiple Simulation Modes**: Normal, noisy, ramp patterns

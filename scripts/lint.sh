@@ -526,6 +526,7 @@ check_file_permissions() {
         "$PROJECT_ROOT/scripts/lint.sh"
         "$PROJECT_ROOT/user/cli/main.py"
         "$PROJECT_ROOT/user/gui/app.py"
+        "$PROJECT_ROOT/tests/test_record_parsing.py"
     )
 
     local perm_failed=0
@@ -554,6 +555,7 @@ check_todos() {
         "$PROJECT_ROOT/user/cli/"*.py
         "$PROJECT_ROOT/user/gui/"*.py
         "$PROJECT_ROOT/scripts/"*.sh
+        "$PROJECT_ROOT/tests/"*.sh
     )
 
     for pattern in "${source_files[@]}"; do

@@ -653,6 +653,141 @@ Failed:        0
 
 The regression script is designed for CI/CD integration. See `.github/workflows/ci.yml` for GitHub Actions configuration.
 
+---
+
+## Unit Tests (Bonus Feature)
+
+### Overview
+
+Unit tests for user-space record parsing and event logic are provided as a **bonus feature** per the challenge requirements. These tests validate the binary protocol and flag handling **without requiring the kernel module**.
+
+**Location**: `tests/test_record_parsing.py`
+
+### Running Unit Tests
+
+```bash
+# Using the test runner script (recommended)
+./tests/run_tests.sh
+
+# Or run directly with Python unittest
+python3 tests/test_record_parsing.py
+
+# Or with pytest (if installed)
+python3 -m pytest tests/test_record_parsing.py -v
+
+# Quick syntax check only
+python3 -m py_compile tests/test_record_parsing.py
+```
+
+### Test Coverage
+
+#### 1. Record Parsing Tests (`TestRecordParsing`)
+
+Tests binary sample structure parsing:
+
+- **Valid Sample Parsing**: Verify correct unpacking of timestamp, temperature, and flags
+- **Sample Size Validation**: Reject invalid buffer sizes (too short, too long)
+- **Negative Temperatures**: Handle signed 32-bit temperature values correctly
+- **Temperature Conversion**: Validate millidegree Celsius to degree conversion
+- **Timestamp Monotonicity**: Verify timestamps increase monotonically
+
+#### 2. Event Logic Tests (`TestEventLogic`)
+
+Tests event flag detection and threshold logic:
+
+- **NEW_SAMPLE Flag**: Detect new sample availability correctly
+- **THRESHOLD_CROSSED Flag**: Detect threshold crossing events
+- **Combined Flags**: Handle multiple flags set simultaneously
+- **Threshold Detection Logic**: Verify threshold crossing detection (>, not ≥)
+
+#### 3. Buffer Handling Tests (`TestBufferHandling`)
+
+Tests partial reads and buffer management:
+
+- **Partial Read Detection**: Reject incomplete sample data
+- **Multiple Samples in Buffer**: Parse consecutive samples correctly
+
+#### 4. Edge Cases (`TestEdgeCases`)
+
+Tests boundary conditions:
+
+- **Maximum Temperature**: Handle max signed 32-bit values (2^31 - 1)
+- **Minimum Temperature**: Handle min signed 32-bit values (-2^31)
+- **Zero Timestamp**: Edge case of zero timestamp
+- **Structure Alignment**: Verify packed structure with no padding
+- **Endianness Consistency**: Verify native endianness handling
+
+### Example Output
+
+```
+==========================================
+  Simtemp Unit Test Suite
+==========================================
+
+test_combined_flags (TestEventLogic) ... ok
+test_new_sample_flag (TestEventLogic) ... ok
+test_threshold_crossed_flag (TestEventLogic) ... ok
+test_threshold_detection_logic (TestEventLogic) ... ok
+test_endianness_consistency (TestEdgeCases) ... ok
+test_maximum_temperature (TestEdgeCases) ... ok
+test_minimum_temperature (TestEdgeCases) ... ok
+test_struct_alignment (TestEdgeCases) ... ok
+test_zero_timestamp (TestEdgeCases) ... ok
+test_multiple_samples_in_buffer (TestBufferHandling) ... ok
+test_partial_read_detection (TestBufferHandling) ... ok
+test_negative_temperature (TestRecordParsing) ... ok
+test_sample_size_validation (TestRecordParsing) ... ok
+test_temperature_conversion (TestRecordParsing) ... ok
+test_timestamp_monotonicity (TestRecordParsing) ... ok
+test_valid_sample_parsing (TestRecordParsing) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.002s
+
+OK
+
+==========================================
+  ✓ All Unit Tests Passed!
+==========================================
+```
+
+### Integration with Build System
+
+Unit tests are automatically validated during the build process:
+
+```bash
+# Build script checks unit test syntax
+./scripts/build.sh
+
+# Output includes:
+# [INFO] Unit tests found at tests/test_record_parsing.py
+# [SUCCESS] Unit tests pass syntax check
+```
+
+### Integration with CI/CD
+
+Unit tests run automatically in the CI pipeline (`.github/workflows/ci.yml`):
+
+```yaml
+- name: Run unit tests
+  run: |
+    echo "Running unit tests for record parsing and event logic..."
+    python3 tests/test_record_parsing.py
+    echo "Unit tests passed ✓"
+```
+
+### Test Philosophy
+
+These unit tests follow best practices:
+
+- **Isolated**: No dependency on kernel module or hardware
+- **Fast**: Complete test suite runs in milliseconds
+- **Comprehensive**: Cover happy path, edge cases, and error conditions
+- **Repeatable**: Deterministic with no external dependencies
+- **CI-Ready**: Automated in continuous integration pipeline
+
+---
+
 ## Test Data Collection
 
 ### Metrics to Track
